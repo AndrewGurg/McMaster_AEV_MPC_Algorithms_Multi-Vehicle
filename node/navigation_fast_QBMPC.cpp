@@ -168,7 +168,8 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 	/* x4 */ 	grad[3]=grad[3]-potfield_factor*2*(bez_curv[i][0]-xopt[0][j+4])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px4;
 	/* y4 */ 	grad[4]=grad[4]-potfield_factor*2*(bez_curv[i][1]-xopt[1][j+4])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py4;
 			}
-			
+		}
+		
 		double x_dot=4*x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
 		double y_dot=6*y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
 		double pdx2=6*(4*pow(t,3)-6*pow(t,2)+2*t);double pdx3=4*(-4*pow(t,3)+3*pow(t,2));double pdy3=pdx3;double pdx4=4*pow(t,3);double pdy4=pdx4; //X_dot & y_dot
@@ -182,9 +183,8 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 		/*M_y3*/	grad[2]=grad[2]-(vel_factor/pow(vel2,2))*2*y_dot*pdy3;
 		/*M_x4*/	grad[3]=grad[3]-(vel_factor/pow(vel2,2))*2*x_dot*pdx4;
 		/*M_y4*/	grad[4]=grad[4]-(vel_factor/pow(vel2,2))*2*y_dot*pdy4;
-		}
+		}		
 		
-		}
 	}
 
 	return funcreturn;
