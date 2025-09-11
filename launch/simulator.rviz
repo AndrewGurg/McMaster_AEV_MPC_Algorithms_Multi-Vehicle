@@ -282,7 +282,7 @@ Visualization Manager:
       Marker Topic: /navigation_QBMPC/vehicle_detect
       Name: Marker
       Namespaces:
-        {}
+        "": true
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -483,7 +483,15 @@ Visualization Manager:
       Marker Topic: /navigation_PD/wall_markers
       Name: Marker
       Namespaces:
-        "": true
+        {}
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /navigation_fast_QBMPC/bez
+      Name: Marker
+      Namespaces:
+        {}
       Queue Size: 100
       Value: true
   Enabled: true
@@ -514,7 +522,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 42.081092834472656
+      Distance: 40.3349494934082
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -522,17 +530,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 2.799788475036621
-        Y: -14.015719413757324
-        Z: 0.002532958984375
+        X: 10.833383560180664
+        Y: 1.915557861328125
+        Z: -0.007213592529296875
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.5697963237762451
+      Pitch: 1.4646269083023071
       Target Frame: <Fixed Frame>
-      Yaw: 0.8355371952056885
+      Yaw: 4.643060684204102
     Saved: ~
 Window Geometry:
   Displays:
@@ -553,4 +561,4 @@ Window Geometry:
     collapsed: true
   Width: 1068
   X: 72
-  Y: 59
+  Y: 27

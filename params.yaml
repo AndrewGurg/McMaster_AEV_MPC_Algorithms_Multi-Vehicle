@@ -9,7 +9,7 @@ buffer_length: 5
 
 # Limits on the speed and steering angle
 max_speed: 3.0 #  meters/second
-min_speed: 0 # (Positive for QBMPC otherwise vehicle stops)
+min_speed: 0 # Otherwise, vehicle stops (for QBMPC)
 max_steering_angle: 0.4189 # radians
 max_accel: 2.5 #7.51 # meters/second^2
 max_decel: 2.5 #8.26 # meters/second^2
@@ -23,7 +23,7 @@ C_S_rear: 5.4562 #.79 # 1/rad ? (estimated weight/4)
 mass: 3.47 # kg (measured on car 'lidart')
 moment_inertia: .04712 # kg m^2 (estimated as a rectangle with width and height of car and evenly distributed mass, then shifted to account for center of mass location)
 
-# The rate at which the pose and the lidar publish (simulation environment only)
+# The rate at which the pose and the lidar publish
 update_pose_rate: 0.01 #This is for smooth pose_update, LIDAR CALLBACK for simulator is fixed at 10 Hz however (after every 10 updates)
 
 # Camera parameters
@@ -203,7 +203,7 @@ CenterOffset: 0
 DistanceLeft: 0.9
 DistanceRight: 0.9
 TrackWall: 0
-angle_bl: rad(270*pi/180) #(All taken with respect to the -x axis, converted in algorithm to express results wrt the +x axis)
+angle_bl: rad(270*pi/180)
 angle_al: rad(200*pi/180) #Changed from 185 to ensure we aren't confused by points ahead, look mainly to side      
 angle_br: rad(90*pi/180)
 angle_ar: rad(160*pi/180) #Changed from 175
@@ -215,21 +215,24 @@ k_p: 3.5
 vehicle_velocity: 1.5
 turn_velocity: 0.8
 velocity_zero: 0.3
-
 # Gap Following Algorithm Parameters
 
-safe_distance: 2
+safe_distance: 2 # MODIFIED up from 2
 right_beam_angle: rad(2*pi*4.0/16)
 left_beam_angle: rad(2*pi*12.0/16)
 turn_angle1: rad(pi/6)
 turn_angle2: rad(pi/3)
 stop_time1: 1.0
 stop_time2: 1.0
+# Speed control paramteres
+heading_beam_angle: rad(pi/8)
+stop_distance: 0.8 #m
+stop_distance_decay: 0.5 #m
 
 #TEB & Comparison Waypoint Generation
 waypoint_distance: 1.0
 waypoint_count: 3
-use_manual_fwd: 0 
+use_manual_fwd: 0 #Doesn't seem to work. The existing methods rely heavily on accurate waypoints. Just comapre my MPC to tuned explore_lite
 
 #MPC Parameters
 nMPC: 2
@@ -243,16 +246,10 @@ yolo_cols: 640
 veh_det_length: 0.5
 veh_det_width: 0.4
 
-use_neural_net: 0 #Enable dynamic vehicle detection for avoidance/pursuit by setting to 1
+use_neural_net: 1
 
 theta_band_smooth: 200
 theta_band_diff: rad(pi/8)
-vel_beta: 10
-
-# Speed control paramteres
-heading_beam_angle: rad(pi/8)
-stop_distance: 0.8 #m
-stop_distance_decay: 0.5 #m
 
 #STLMPC Optimization Base Weights
 d_factor_STLMPC: 1
@@ -270,17 +267,26 @@ bez_ctrl_pts: 5
 bez_curv_pts: 10
 bez_alpha: 5.5
 bez_beta: 10
-bez_min_dist: 0.3
+bez_min_dist: 0.5
 bez_t_end: 1.5
 obs_sep: 0.2
 max_obs: 50
 #QBMPC only has one objective term, no need for base weights
 
+# F-QBMPC Parameters
+theta_band_smooth: 200
+theta_band_diff: rad(pi/8)
+vel_beta: 10
+stop_dist_decay: 0.5
+
+# F-QBMPC Base Weights
+pot_field_factor_F_QBMPC: 1
+velocity_factor_F_QBMPC: 1
 
 #Leader-follower MPC pursuit parameters
 MPC_dist: 0.8 #Min distance, below which we focus on MPC
 pursuit_dist: 1.5 #Max distance, above which we prioritize pursuit
-transit_rate: 0.05 #Transition rate, how fast to switch weightings on each mode
+transit_rate: 0.05 #Transition rate, how fast to switch sweightings on each mode
 min_pursue: 0.7 #Min distance allowed to the leader
 min_delta: 0.002 #Minimum delta, to ensure our circle arc radius doesn't become 1/0 (undefined)
 pursuit_x: 2.1 #The trajectory at which we want to maintain position from leader, here we want leader 2.1 m ahead in x
@@ -303,7 +309,7 @@ pursuit_factor_P_QBMPC: 0.1
 optim_mode: 1 
 max_lidar_range_opt: 5.0
 # Determines if RGB-D camera is used
-use_camera: 0
+use_camera: 1
 
 #Important tuning parameters
 #-> max_lidar_range_opt depending on hall width, open space, sim map, etc (same for safe_distance)
