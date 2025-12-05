@@ -170,6 +170,7 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 			}
 		}
 		
+		// Variables used in velocity term and gradients
 		double x_dot=4*x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
 		double y_dot=6*y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
 		double pdx2=6*(4*pow(t,3)-6*pow(t,2)+2*t);double pdx3=4*(-4*pow(t,3)+3*pow(t,2));double pdy3=pdx3;double pdx4=4*pow(t,3);double pdy4=pdx4; //X_dot & y_dot
@@ -519,6 +520,9 @@ class GapBarrier
 		std::string depth_image_topic, depth_info_topic, cv_ranges_topic, depth_index_topic, color_image_topic, color_info_topic, cam_extr_topic,
 		depth_points_topic,lidarscan_topic, drive_topic, odom_topic, mux_topic, imu_topic, map_topic, yolo_data_topic;
 
+		// tf frames
+		std::string map_frame, base_frame, scan_frame;
+
 		//time
 		double current_time = ros::Time::now().toSec();
 		double prev_time = current_time;
@@ -708,6 +712,12 @@ class GapBarrier
 			nf.getParam("speed_to_erpm_offset", speed_to_erpm_offset);
 
 
+			        // Get the transformation frame names
+			nf.getParam("map_frame", map_frame);
+			nf.getParam("base_frame", base_frame);
+			nf.getParam("scan_frame", scan_frame);
+
+
 
 			//lidar params
 			nf.getParam("scan_beams", scan_beams);
@@ -884,7 +894,7 @@ class GapBarrier
 			if(use_camera)
 			{
 				cv_ranges_msg= sensor_msgs::LaserScan(); //call constructor
-				cv_ranges_msg.header.frame_id= "laser";
+				cv_ranges_msg.header.frame_id= scan_frame;
 				cv_ranges_msg.angle_increment= this->ls_ang_inc; 
 				cv_ranges_msg.time_increment = 0;
 				cv_ranges_msg.range_min = 0;
@@ -953,7 +963,7 @@ class GapBarrier
 			int updated=0;
 			 for (const geometry_msgs::TransformStamped& transform : msg->transforms)
 			{
-				if (transform.header.frame_id == "odom" && transform.child_frame_id == "base_link")
+				if (transform.header.frame_id == "odom" && transform.child_frame_id == base_frame)
 				{
 					odomx=transform.transform.translation.x;
 					odomy=transform.transform.translation.y;
@@ -974,7 +984,7 @@ class GapBarrier
 					if(past_tf.size()>10) past_tf.erase(past_tf.begin());
 
 				}
-				else if (transform.header.frame_id == "map" && transform.child_frame_id == "odom")
+				else if (transform.header.frame_id == map_frame && transform.child_frame_id == "odom")
 				{
 					mapx=transform.transform.translation.x;
 					mapy=transform.transform.translation.y;
@@ -987,7 +997,7 @@ class GapBarrier
 					updated=1;
 				}
 
-				else if (transform.header.frame_id == "map" && transform.child_frame_id == "det_racecar_base_link") //Simulation detection of other vehicle
+				else if (transform.header.frame_id == map_frame && transform.child_frame_id == "det_racecar_base_link") //Simulation detection of other vehicle
 				{
 					//Just for the one vehicle detection case
 					double robx=transform.transform.translation.x;
@@ -1023,7 +1033,7 @@ class GapBarrier
 						car_detects[0].meas_tf=new_tf;
 					}
 				}
-				else if(transform.header.frame_id == "map" && transform.child_frame_id == "base_link"){ //This is for simulation only
+				else if(transform.header.frame_id == map_frame && transform.child_frame_id == base_frame){ //This is for simulation only
 					simx=transform.transform.translation.x;
 					simy=transform.transform.translation.y;
 					// 		transform.transform.translation.z);
@@ -2090,7 +2100,7 @@ class GapBarrier
 			//This should occur whether or not we are in autonomous mode
 
 			//Publish the detected vehicle(s) trajectory(s)
-			vehicle_detect_path.header.frame_id = "base_link";
+			vehicle_detect_path.header.frame_id = base_frame;
 			vehicle_detect_path.header.stamp = ros::Time::now();
 			vehicle_detect_path.type = visualization_msgs::Marker::LINE_LIST;
 			vehicle_detect_path.id = 0; 
@@ -2900,7 +2910,7 @@ class GapBarrier
 
 
 				//Publish the optimal path via NLOPT
-				marker.header.frame_id = "base_link";
+				marker.header.frame_id = base_frame;
 				marker.header.stamp = ros::Time::now();
 				marker.type = visualization_msgs::Marker::LINE_LIST;
 				marker.id = 0; 
@@ -2930,7 +2940,7 @@ class GapBarrier
 				marker_pub.publish(marker);
 
 				//Publish the MPC tracking lines
-				mpc_marker.header.frame_id = "base_link";
+				mpc_marker.header.frame_id = base_frame;
 				mpc_marker.header.stamp = ros::Time::now();
 				mpc_marker.type = visualization_msgs::Marker::LINE_LIST;
 				mpc_marker.id = 0; 
@@ -2957,7 +2967,7 @@ class GapBarrier
 
 
 				//Publish the left obstacle points
-				lobs_marker.header.frame_id = "base_link";
+				lobs_marker.header.frame_id = base_frame;
 				lobs_marker.header.stamp = ros::Time::now();
 				lobs_marker.type = visualization_msgs::Marker::LINE_LIST;
 				lobs_marker.id = 0; 
@@ -2988,7 +2998,7 @@ class GapBarrier
 				lobs.publish(lobs_marker);
 
 				//Publish the right obstacle points
-				robs_marker.header.frame_id = "base_link";
+				robs_marker.header.frame_id = base_frame;
 				robs_marker.header.stamp = ros::Time::now();
 				robs_marker.type = visualization_msgs::Marker::LINE_LIST;
 				robs_marker.id = 0; 
@@ -3024,7 +3034,7 @@ class GapBarrier
 
 
 				//Publish the bezier points
-				bez.header.frame_id = "base_link";
+				bez.header.frame_id = base_frame;
 				bez.header.stamp = ros::Time::now();
 				bez.type = visualization_msgs::Marker::POINTS;
 				bez.id = 0; 
@@ -3095,7 +3105,7 @@ class GapBarrier
 
 			ackermann_msgs::AckermannDriveStamped drive_msg; 
 			drive_msg.header.stamp = ros::Time::now();
-			drive_msg.header.frame_id = "base_link";
+			drive_msg.header.frame_id = base_frame;
 			if(startcheck==1){
 				drive_msg.drive.steering_angle = delta_d; //delta_d
 				if(forcestop==0){ //If the optimization fails for some reason, we get nan: stop the vehicle

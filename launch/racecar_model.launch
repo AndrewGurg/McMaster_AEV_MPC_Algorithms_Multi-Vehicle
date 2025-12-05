@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <launch>
   <!-- group for racecar -->
-  <group ns="racecar">
+  <group ns="racecar1">
   <!-- Open the model file -->
   <arg name="racecar_xacro" default="$(find f1tenth_simulator)/racecar.xacro"/>
   <!--<param name="tf_prefix" value="racecar"/>-->
@@ -10,7 +10,7 @@
   <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
   </group>
 
-  <group ns="det_racecar">
+  <group ns="racecar2">
     <arg name="det_racecar_xacro" default="$(find f1tenth_simulator)/det_racecar.xacro"/>
     <param name="robot_description" command="xacro --inorder '$(arg det_racecar_xacro)'"/>
     <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"/>

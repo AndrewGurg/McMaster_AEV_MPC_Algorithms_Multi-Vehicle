@@ -133,19 +133,19 @@ keyboard_steer_ang: .3  # radians
 obstacle_size: 2
 
 # The names of topics to listen and publish to
-joy_topic: "/joy"
-drive_topic: "/drive" #Change to /drive for normal control from joy
+joy_topic: "/racecar1/joy"
+drive_topic: "/racecar1/drive" #Change to /drive for normal control from joy
 map_topic: "/map"
 distance_transform_topic: "/dt"
-scan_topic: "/scan"
-pose_topic: "/pose"
+scan_topic: "/racecar1/scan"
+pose_topic: "/racecar1/pose"
 ground_truth_pose_topic: "/gt_pose"
-odom_topic: "/odom"
-imu_topic: "/imu/data"
+odom_topic: "/racecar1/odom"
+imu_topic: "/racecar1/imu/data"
 pose_rviz_topic: "/initialpose"
-keyboard_topic: "/key"
+keyboard_topic: "key"
 brake_bool_topic: "/brake_bool"
-mux_topic: "/mux"
+mux_topic: "/racecar1/mux"
 depth_image_topic: "/camera/depth/image_rect_raw"
 rgb_image_topic: "/camera/color/image_raw"
 depth_info_topic: "/camera/depth/camera_info"
@@ -155,15 +155,12 @@ cv_ranges_topic: "/depth_image"
 depth_index_topic: "/depth_index"
 depth_points_topic: "/depth_points"
 
-# Multi vehicle parameters
-num_vehicles: 2
-vehicle_prefix: "racecar"
 
 
 # Topic names of various drive channels
 rand_drive_topic: "/rand_drive"
 brake_drive_topic: "/brake"
-nav_drive_topic: "/nav"
+nav_drive_topic: "/racecar1/nav"
 # **Add name for new planning method here**
 new_drive_topic: "/new_drive"
 collision_assistance_drive_topic: "/collision_assistance"
@@ -173,11 +170,11 @@ collision_file: "collision_file"
 
 # The names of the transformation frames published to
 map_frame: "map"
-base_frame: "base_link"
-base_frame_imu: "base_link_imu"
-scan_frame: "laser"
-odom_frame: "odom"
-tf_prefix: ""
+base_frame: "racecar1/base_link"
+base_frame_imu: "racecar1/base_link_imu"
+scan_frame: "racecar1/laser"
+odom_frame: "racecar1/odom"
+tf_prefix: "racecar1"
 
 broadcast_transform: true
 publish_ground_truth_pose: true

@@ -10,6 +10,7 @@
 #include <std_msgs/String.h>
 
 #include <fstream>
+#include <cctype>
 
 #include "f1tenth_simulator/car_state.hpp"
 #include "f1tenth_simulator/precompute.hpp"
@@ -30,7 +31,7 @@ private:
     ros::Subscriber brake_bool_sub;
 
     // Publisher for mux controller
-    ros::Publisher mux_pub;
+    std::vector<ros::Publisher> mux_pub;
 
     // Mux indices
     int joy_mux_idx;
@@ -42,9 +43,13 @@ private:
     // int new_mux_idx;
     int collision_assistance_mux_idx;
    
+    // For multi-vehicle capabilities
+    int num_vehicles;
+    std::string vehicle_prefix;
+    int active_vehicle_idx;
 
     // Mux controller array
-    std::vector<bool> mux_controller;
+    std::vector<std::vector<bool>> mux_controller;
     int mux_size;
 
     // Button indices
@@ -103,8 +108,22 @@ public:
         n.getParam("keyboard_topic", keyboard_topic);
         n.getParam("brake_bool_topic", brake_bool_topic);
 
-        // Make a publisher for mux messages
-        mux_pub = n.advertise<std_msgs::Int32MultiArray>(mux_topic, 10);
+
+        n.getParam("num_vehicles", num_vehicles);
+        active_vehicle_idx = 0;
+
+        mux_pub.reserve(num_vehicles);
+        if(num_vehicles > 1){
+            n.getParam("vehicle_prefix", vehicle_prefix);      
+            for (int i = 0; i < num_vehicles; i++) {
+                mux_pub[i] = n.advertise<std_msgs::Int32MultiArray>(vehicle_prefix+std::to_string(i+1)+mux_topic, 10);
+            }
+        }
+        else{
+            // Make a publisher for mux messages
+            mux_pub[0] = n.advertise<std_msgs::Int32MultiArray>(mux_topic, 10);
+        }
+        
 
         // Start subscribers to listen to laser scan, joy, IMU, and odom messages
         laser_sub = n.subscribe(scan_topic, 1, &BehaviorController::laser_callback, this);
@@ -146,13 +165,13 @@ public:
         // ***Add key char for new planner here***
         // n.getParam("new_key_char", new_key_char);
 
-        // Initialize the mux controller 
+        // Initialize the mux controller (per vehicle)
         n.getParam("mux_size", mux_size);
-        mux_controller.reserve(mux_size);
-        for (int i = 0; i < mux_size; i++) {
-            mux_controller[i] = false;
+        mux_controller = {};
+        for (int j = 0; j < num_vehicles; j++){
+            std::vector<bool> one_mux(mux_size, false);
+            mux_controller.push_back(one_mux);
         }
-
 
         // Initialize state
         state = {.x=0.0, .y=0.0, .theta=0.0, .velocity=0.0, .steer_angle=0.0, .angular_velocity=0.0, .slip_angle=0.0, .st_dyn=false};
@@ -189,22 +208,22 @@ public:
         mux_msg.data.clear();
         // push data onto message
         for (int i = 0; i < mux_size; i++) {
-            mux_msg.data.push_back(int(mux_controller[i]));
+            mux_msg.data.push_back(int(mux_controller[active_vehicle_idx][i]));
         }
 
         // publish mux message
-        mux_pub.publish(mux_msg);
+        mux_pub[active_vehicle_idx].publish(mux_msg);
+
     }
 
     void change_controller(int controller_idx) {
         // This changes the controller to the input index and publishes it
-
         // turn everything off
         for (int i = 0; i < mux_size; i++) {
-            mux_controller[i] = false;
+            mux_controller[active_vehicle_idx][i] = false;
         }
         // turn on desired controller
-        mux_controller[controller_idx] = true;
+        mux_controller[active_vehicle_idx][controller_idx] = true;
 
         publish_mux();
     }
@@ -247,18 +266,30 @@ public:
 
         // turn everything off
         for (int i = 0; i < mux_size; i++) {
-            mux_controller[i] = false;
+            mux_controller[active_vehicle_idx][i] = false;
         }
 
         publish_mux();
     }
 
+    void switch_vehicle(int vehicle_number){
+        // This takes the vehicle number and switches to control the mux of that vehicle
+        // Check its a new vehicle and we have enough vehicles
+        if (active_vehicle_idx != (vehicle_number - 1) && vehicle_number != 0 && vehicle_number <= num_vehicles){
+            ROS_INFO_STREAM("Vehicle #" << vehicle_number << " activated.");
+            active_vehicle_idx = vehicle_number - 1;
+        } else if(vehicle_number > num_vehicles){
+            ROS_INFO_STREAM("Not enough vehicles, there are only " << num_vehicles);
+        }
+        
+    }
+
     void toggle_mux(int mux_idx, std::string driver_name) {
         // This takes in an index and the name of the planner/driver and 
         // toggles the mux appropiately
-        if (mux_controller[mux_idx]) {
+        if (mux_controller[active_vehicle_idx][mux_idx]) {
             ROS_INFO_STREAM(driver_name << " turned off");
-            mux_controller[mux_idx] = false;
+            mux_controller[active_vehicle_idx][mux_idx] = false;
             publish_mux();
         }
         else {
@@ -269,15 +300,15 @@ public:
 
     void toggle_brake_mux() {
 
-        if (mux_controller[brake_mux_idx] == false)
+        if (mux_controller[active_vehicle_idx][brake_mux_idx] == false)
          {
                 ROS_INFO_STREAM("Emergency brake engaged");
         // turn everything off
          for (int i = 0; i < mux_size; i++) {
-            mux_controller[i] = false;
+            mux_controller[active_vehicle_idx][i] = false;
         }
         // turn on desired controller
-        mux_controller[brake_mux_idx] = true;
+        mux_controller[active_vehicle_idx][brake_mux_idx] = true;
         }
 
         publish_mux();
@@ -289,8 +320,8 @@ public:
     void brake_callback(const std_msgs::Bool & msg) {
         if (msg.data && safety_on) {
             toggle_brake_mux();
-        } else if (!msg.data && mux_controller[brake_mux_idx]) {
-            mux_controller[brake_mux_idx] = false;
+        } else if (!msg.data && mux_controller[active_vehicle_idx][brake_mux_idx]) {
+            mux_controller[active_vehicle_idx][brake_mux_idx] = false;
         }
     }
 
@@ -357,7 +388,11 @@ public:
         } else if (msg.data == nav_key_char) {
             // nav
             toggle_mux(nav_mux_idx, "Navigation");
+        } else if (msg.data == "1" or msg.data =="2"){
+            // Switching vehicle (convert char to int)
+            switch_vehicle(std::stoi(msg.data));
         }
+
         // ***Add new else if statement here for new planning method***
         // if (msg.data == new_key_char) {
         //  // new planner
