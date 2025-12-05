@@ -521,7 +521,7 @@ class GapBarrier
 		depth_points_topic,lidarscan_topic, drive_topic, odom_topic, mux_topic, imu_topic, map_topic, yolo_data_topic;
 
 		// tf frames
-		std::string map_frame, base_frame, scan_frame;
+		std::string map_frame, base_frame, scan_frame, odom_frame, tf_prefix, ext_prefix;
 
 		//time
 		double current_time = ros::Time::now().toSec();
@@ -712,10 +712,21 @@ class GapBarrier
 			nf.getParam("speed_to_erpm_offset", speed_to_erpm_offset);
 
 
-			        // Get the transformation frame names
+			// Get the transformation frame names
 			nf.getParam("map_frame", map_frame);
 			nf.getParam("base_frame", base_frame);
 			nf.getParam("scan_frame", scan_frame);
+			nf.getParam("odom_frame", odom_frame);
+			nf.getParam("tf_prefix", tf_prefix);
+
+			// Get an external vehicle's frame prefix
+			if(tf_prefix != ""){
+				int ext_car_num = (tf_prefix[tf_prefix.find('/')-1] - '0') + 1;	// Add one to this cars number
+				ext_prefix = "racecar" + std::to_string(ext_car_num) + "/";
+			}
+			else{
+				ext_prefix = "racecarX/";
+			}
 
 
 
@@ -867,7 +878,7 @@ class GapBarrier
         	cv_image_data_defined= false;
 
 			//subscriptions
-			lidar = nf.subscribe("/scan",1, &GapBarrier::lidar_callback, this);
+			lidar = nf.subscribe(lidarscan_topic,1, &GapBarrier::lidar_callback, this);
 			imu = nf.subscribe(imu_topic,1, &GapBarrier::imu_callback, this);
 			mux = nf.subscribe(mux_topic,1, &GapBarrier::mux_callback, this);
 			vesc_state_sub= nf.subscribe("/sensors/core", 1, &GapBarrier::vesc_callback, this);
@@ -963,7 +974,7 @@ class GapBarrier
 			int updated=0;
 			 for (const geometry_msgs::TransformStamped& transform : msg->transforms)
 			{
-				if (transform.header.frame_id == "odom" && transform.child_frame_id == base_frame)
+				if (transform.header.frame_id == odom_frame && transform.child_frame_id == base_frame)
 				{
 					odomx=transform.transform.translation.x;
 					odomy=transform.transform.translation.y;
@@ -984,7 +995,7 @@ class GapBarrier
 					if(past_tf.size()>10) past_tf.erase(past_tf.begin());
 
 				}
-				else if (transform.header.frame_id == map_frame && transform.child_frame_id == "odom")
+				else if (transform.header.frame_id == map_frame && transform.child_frame_id == odom_frame)
 				{
 					mapx=transform.transform.translation.x;
 					mapy=transform.transform.translation.y;
@@ -997,7 +1008,7 @@ class GapBarrier
 					updated=1;
 				}
 
-				else if (transform.header.frame_id == map_frame && transform.child_frame_id == "det_racecar_base_link") //Simulation detection of other vehicle
+				else if (transform.header.frame_id == map_frame && transform.child_frame_id == (ext_prefix + "base_link")) //Simulation detection of other vehicle
 				{
 					//Just for the one vehicle detection case
 					double robx=transform.transform.translation.x;

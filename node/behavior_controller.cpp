@@ -21,6 +21,7 @@ class BehaviorController {
 private:
     // A ROS node
     ros::NodeHandle n;
+    ros::NodeHandle n_pub;
 
     // Listen for messages from joystick, keyboard, laser scan, odometry, and IMU
     ros::Subscriber joy_sub;
@@ -97,6 +98,7 @@ public:
     BehaviorController() {
         // Initialize the node handle
         n = ros::NodeHandle("~");
+        n_pub = ros::NodeHandle("");
 
         // get topic names
         std::string scan_topic, odom_topic, imu_topic, joy_topic, keyboard_topic, brake_bool_topic, mux_topic;
@@ -116,12 +118,12 @@ public:
         if(num_vehicles > 1){
             n.getParam("vehicle_prefix", vehicle_prefix);      
             for (int i = 0; i < num_vehicles; i++) {
-                mux_pub[i] = n.advertise<std_msgs::Int32MultiArray>(vehicle_prefix+std::to_string(i+1)+mux_topic, 10);
+                mux_pub[i] = n_pub.advertise<std_msgs::Int32MultiArray>(vehicle_prefix+std::to_string(i+1)+"/"+mux_topic, 10);
             }
         }
         else{
             // Make a publisher for mux messages
-            mux_pub[0] = n.advertise<std_msgs::Int32MultiArray>(mux_topic, 10);
+            mux_pub[0] = n_pub.advertise<std_msgs::Int32MultiArray>(mux_topic, 10);
         }
         
 

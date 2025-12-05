@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 
 <!-- A simple model of the racecar for rviz -->
-<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="racecar1">
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="racecar2">
 
   <xacro:property name="wheelbase" value="0.5002" />
   <xacro:property name="width" value="0.3632" />
@@ -22,7 +22,7 @@
   </material>
   
   <!-- Define a prefix property -->
-  <xacro:property name="prefix" value="racecar1/" />
+  <xacro:property name="prefix" value="racecar2/" />
 
   <link name="${prefix}base_link">
     <visual>

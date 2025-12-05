@@ -174,7 +174,7 @@ base_frame: "racecar2/base_link"
 base_frame_imu: "racecar2/base_link_imu"
 scan_frame: "racecar2/laser"
 odom_frame: "racecar2/odom"
-tf_prefix: "racecar2"
+tf_prefix: "racecar2/"
 
 
 broadcast_transform: true

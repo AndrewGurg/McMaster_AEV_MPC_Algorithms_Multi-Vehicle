@@ -207,7 +207,7 @@ public:
         n.getParam("map_frame", map_frame);
         n.getParam("base_frame", base_frame);
         n.getParam("scan_frame", scan_frame);
-        n.getParam("tf_namespace", tf_prefix);
+        n.getParam("tf_prefix", tf_prefix);
 
         // Fetch the car parameters
         int scan_beams;
@@ -960,11 +960,11 @@ public:
         ts_wheel.transform.rotation.z = quat_wheel.z();
         ts_wheel.transform.rotation.w = quat_wheel.w();
         ts_wheel.header.stamp = timestamp;
-        ts_wheel.header.frame_id = tf_prefix+"/front_left_hinge";
-        ts_wheel.child_frame_id = tf_prefix+"/front_left_wheel";
+        ts_wheel.header.frame_id = tf_prefix+"front_left_hinge";
+        ts_wheel.child_frame_id = tf_prefix+"front_left_wheel";
         br.sendTransform(ts_wheel);
-        ts_wheel.header.frame_id = tf_prefix+"/front_right_hinge";
-        ts_wheel.child_frame_id = tf_prefix+"/front_right_wheel";
+        ts_wheel.header.frame_id = tf_prefix+"front_right_hinge";
+        ts_wheel.child_frame_id = tf_prefix+"front_right_wheel";
         br.sendTransform(ts_wheel);
 
         // quat_wheel.setEuler(0., 0., 0);

@@ -21,10 +21,10 @@
     <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
   </node>
 
- <group ns="racecar1">
+  <!-- Launch the racecar models -->
+  <include file="$(find f1tenth_simulator)/launch/racecar_model.launch"/>
 
-    <!-- Launch the racecar model -->
-    <include file="$(find f1tenth_simulator)/launch/racecar_model_single.launch"/>
+ <group ns="racecar1">
 
     <!-- Begin the simulator with the parameters from params.yaml -->
     <node pkg="f1tenth_simulator" name="f1tenth_simulator" type="simulator" output="screen">
@@ -59,13 +59,14 @@
       <rosparam command="load" file="$(find f1tenth_simulator)/params_ego.yaml"/>
     </node>
 
+    <node pkg="f1tenth_simulator" name="vehicle_detector" type="vehicle_detection" output="screen">
+    <rosparam command="load" file="$(find f1tenth_simulator)/params_ego.yaml"/>
+  </node>
+
   </group>
 
 
  <group ns="racecar2">
-
-    <!-- Launch the racecar model -->
-    <include file="$(find f1tenth_simulator)/launch/racecar_model_single.launch"/>
 
     <!-- Begin the simulator with the parameters from params.yaml -->
     <node pkg="f1tenth_simulator" name="f1tenth_simulator" type="simulator" output="screen">

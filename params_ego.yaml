@@ -143,7 +143,7 @@ ground_truth_pose_topic: "/gt_pose"
 odom_topic: "/racecar1/odom"
 imu_topic: "/racecar1/imu/data"
 pose_rviz_topic: "/initialpose"
-keyboard_topic: "key"
+keyboard_topic: "/key"
 brake_bool_topic: "/brake_bool"
 mux_topic: "/racecar1/mux"
 depth_image_topic: "/camera/depth/image_rect_raw"
@@ -174,7 +174,7 @@ base_frame: "racecar1/base_link"
 base_frame_imu: "racecar1/base_link_imu"
 scan_frame: "racecar1/laser"
 odom_frame: "racecar1/odom"
-tf_prefix: "racecar1"
+tf_prefix: "racecar1/"
 
 broadcast_transform: true
 publish_ground_truth_pose: true
