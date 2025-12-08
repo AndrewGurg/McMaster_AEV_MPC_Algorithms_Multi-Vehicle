@@ -911,44 +911,6 @@ public:
     }
 
 
-    void pub_pose_det_transform(ros::Time timestamp) {
-        // Convert the pose into a transformation
-        geometry_msgs::Transform t;
-        t.translation.x = state_det.x;
-        t.translation.y = state_det.y;
-        tf2::Quaternion quat;
-        quat.setEuler(0., 0., state_det.theta);
-        t.rotation.x = quat.x();
-        t.rotation.y = quat.y();
-        t.rotation.z = quat.z();
-        t.rotation.w = quat.w();
-
-        // publish ground truth pose
-        geometry_msgs::PoseStamped ps;
-        ps.header.frame_id = "/map";
-        ps.pose.position.x = state_det.x;
-        ps.pose.position.y = state_det.y;
-        ps.pose.orientation.x = quat.x();
-        ps.pose.orientation.y = quat.y();
-        ps.pose.orientation.z = quat.z();
-        ps.pose.orientation.w = quat.w();
-
-        // Add a header to the transformation
-        geometry_msgs::TransformStamped ts;
-        ts.transform = t;
-        ts.header.stamp = timestamp;
-        ts.header.frame_id = map_frame;
-        ts.child_frame_id = "det_racecar_base_link";
-
-        // Publish them
-        if (broadcast_transform) {
-            br.sendTransform(ts);
-        }
-        if (pub_gt_pose) {
-            pose_pub.publish(ps);
-        }
-    }
-
     void pub_steer_ang_transform(ros::Time timestamp) {
         // Set the steering angle to make the wheels move
         // Publish the steering angle
@@ -966,21 +928,6 @@ public:
         ts_wheel.header.frame_id = tf_prefix+"front_right_hinge";
         ts_wheel.child_frame_id = tf_prefix+"front_right_wheel";
         br.sendTransform(ts_wheel);
-
-        // quat_wheel.setEuler(0., 0., 0);
-        // ts_wheel.transform.rotation.x = 0;
-        // ts_wheel.transform.rotation.y = 0;
-        // ts_wheel.transform.rotation.z = 0;
-        // ts_wheel.transform.rotation.w = 1;
-        // ts_wheel.header.stamp = timestamp;
-        // ts_wheel.header.frame_id = "det_racecar_front_left_hinge";
-        // ts_wheel.child_frame_id = "det_racecar_front_left_wheel";
-        // br.sendTransform(ts_wheel);
-        // ts_wheel.header.frame_id = "det_racecar_front_right_hinge";
-        // ts_wheel.child_frame_id = "det_racecar_front_right_wheel";
-        // br.sendTransform(ts_wheel);
-
-
     }
 
     void pub_laser_link_transform(ros::Time timestamp) {
