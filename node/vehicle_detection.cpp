@@ -558,9 +558,12 @@ class GapBarrier
 			driver_pub = nf.advertise<ackermann_msgs::AckermannDriveStamped>(drive_topic, 1);
 
 			// Empty Files for Graphing Data
-			FILE *file1 = fopen("/home/gjsk/catkin_ws/Sim_Data/NEES.txt", "w");
-			fclose(file1);
-
+			FILE *file_states= fopen("/home/gjsk/catkin_ws/Sim_Data/states.txt", "w");
+			fclose(file_states);
+			FILE *file_var= fopen("/home/gjsk/catkin_ws/Sim_Data/variance.txt", "w");
+			fclose(file_var);
+			FILE *file_nees= fopen("/home/gjsk/catkin_ws/Sim_Data/NEES_NIS.txt", "w");
+			fclose(file_nees);
 
 			if(use_camera)
 			{
@@ -1620,6 +1623,30 @@ class GapBarrier
 				std::cout << "Failed..." << std::endl;
 			}
 
+			if(sim_graph_time < 10) { 
+				// At the end of each time sample, collect simulation data for graphing
+				// Position, Heading Estimate Vs. True
+				FILE *file_states = fopen("/home/gjsk/catkin_ws/Sim_Data/states.txt", "a");
+				fprintf(file_states,"%lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", sim_graph_time, 
+						car_detects[q].state[0], real_state(0), car_detects[q].state[1], real_state(1), car_detects[q].state[2], real_state(2), 
+						car_detects[q].state[3], real_state(3), car_detects[q].state[4], real_state(4),);
+				fclose(file_states);
+				// Velocity Estimate Vs. True
+
+				// Steering Angle Estimate Vs. True
+
+				// Predicted Vs. Updated Variance for each parameter
+				FILE *file_var = fopen("/home/gjsk/catkin_ws/Sim_Data/variance.txt", "a");
+				fprintf(file_states,"%lf, %lf, %lf, %lf\n", sim_graph_time, 
+						car_detects[q].cov_P(0,0), car_detects[q].cov_P(1,1), car_detects[q].cov_P(2,2), car_detects[q].cov_P(3,3), car_detects[q].cov_P(4,4));
+				fclose(file_var);
+				// NEES 
+				FILE *file_nees = fopen("/home/gjsk/catkin_ws/Sim_Data/NEES_NIS.txt", "a");
+				fprintf(file_nees,"%lf, %lf, %lf\n",sim_graph_time,NEES,NIS);
+				fclose(file_nees);
+				sim_graph_time += dt;
+			}
+
 		}
 
 		void EKF_known_input(int q, double dt){
@@ -1735,6 +1762,29 @@ class GapBarrier
 				std::cout << "Passed!" << std::endl;
 			} else{
 				std::cout << "Failed..." << std::endl;
+			}
+
+			if(sim_graph_time < 10) { 
+				// At the end of each time sample, collect simulation data for graphing
+				// Position, Heading Estimate Vs. True
+				FILE *file_states = fopen("/home/gjsk/catkin_ws/Sim_Data/states.txt", "a");
+				fprintf(file_states,"%lf, %lf, %lf, %lf, %lf, %lf, %lf\n", sim_graph_time, 
+						car_detects[q].state[0], real_state(0), car_detects[q].state[1], real_state(1), car_detects[q].state[2], real_state(2));
+				fclose(file_states);
+				// Velocity Estimate Vs. True
+
+				// Steering Angle Estimate Vs. True
+
+				// Predicted Vs. Updated Variance for each parameter
+				FILE *file_var = fopen("/home/gjsk/catkin_ws/Sim_Data/variance.txt", "a");
+				fprintf(file_states,"%lf, %lf, %lf, %lf\n", sim_graph_time, 
+						car_detects[q].cov_P(0,0), car_detects[q].cov_P(1,1), car_detects[q].cov_P(2,2));
+				fclose(file_var);
+				// NEES 
+				FILE *file_nees = fopen("/home/gjsk/catkin_ws/Sim_Data/NEES_NIS.txt", "a");
+				fprintf(file_nees,"%lf, %lf, %lf\n",sim_graph_time,NEES,NIS);
+				fclose(file_nees);
+				sim_graph_time += dt;
 			}
 
 		}
