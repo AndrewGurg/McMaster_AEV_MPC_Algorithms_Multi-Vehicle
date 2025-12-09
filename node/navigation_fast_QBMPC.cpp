@@ -2527,9 +2527,9 @@ class GapBarrier
 								smallestdist=fused_ranges_MPC[i];
 							}
 						}
-						FILE *file1w = fopen("/home/gjsk/1_closest_ob.txt", "a");
-						fprintf(file1w,"%lf\n",smallestdist);
-						fclose(file1w);
+						// FILE *file1w = fopen("/home/gjsk/1_closest_ob.txt", "a");
+						// fprintf(file1w,"%lf\n",smallestdist);
+						// fclose(file1w);
 						
 					}
 
@@ -2763,9 +2763,9 @@ class GapBarrier
 							}
 						}
 						if(min_dist>obs_sep1 && pow(pow(x_ob,2)+pow(y_ob,2),0.5)<max_lidar_range_opt){
-							FILE *file1 = fopen("/home/gjsk/catkin_ws/bezier.txt", "a");
-							fprintf(file1,"%lf, %lf\n",obstacle[0],obstacle[1]);
-							fclose(file1);
+							// FILE *file1 = fopen("/home/gjsk/catkin_ws/bezier.txt", "a");
+							// fprintf(file1,"%lf, %lf\n",obstacle[0],obstacle[1]);
+							// fclose(file1);
 							sub_bez_obs.push_back({obstacle[0],obstacle[1]});
 						}
 						
@@ -2774,9 +2774,9 @@ class GapBarrier
 					obs_sep1=obs_sep1*1.1;
 				}
 
-				FILE *file1 = fopen("/home/gjsk/catkin_ws/bezier.txt", "a");
-				fprintf(file1,"*******************\n");
-				fclose(file1);
+				// FILE *file1 = fopen("/home/gjsk/catkin_ws/bezier.txt", "a");
+				// fprintf(file1,"*******************\n");
+				// fclose(file1);
 				
 				//PERFORM THE MPC NON-LINEAR OPTIMIZATION
 				nlopt_opt opt;
@@ -2869,12 +2869,12 @@ class GapBarrier
 					bez_x4=x[3];
 					bez_y4=x[4];
 
-					FILE *file1wq = fopen("/home/gjsk/1_opt_time.txt", "a");
-					fprintf(file1wq,"%lf\n",opt_time2-opt_time1);
-					fclose(file1wq);
-					FILE *file1wr = fopen("/home/gjsk/1_states.txt", "a");
-					fprintf(file1wr,"%lf,%lf,%lf,%lf,%lf\n",opt_time2,locx,locy,last_delta,vel_adapt);
-					fclose(file1wr);
+					// FILE *file1wq = fopen("/home/gjsk/1_opt_time.txt", "a");
+					// fprintf(file1wq,"%lf\n",opt_time2-opt_time1);
+					// fclose(file1wq);
+					// FILE *file1wr = fopen("/home/gjsk/1_states.txt", "a");
+					// fprintf(file1wr,"%lf,%lf,%lf,%lf,%lf\n",opt_time2,locx,locy,last_delta,vel_adapt);
+					// fclose(file1wr);
 					printf("%lf, %lf\n",last_delta,vel_adapt);
 
 					

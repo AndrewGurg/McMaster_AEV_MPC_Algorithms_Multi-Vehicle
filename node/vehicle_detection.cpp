@@ -154,6 +154,7 @@ class GapBarrier
 		ros::Publisher robs;
 		ros::Publisher bez_mark;
 		ros::Publisher vehicle_detect;
+		ros::Publisher vehicle_lidar;
 		ros::Publisher driver_pub;
 		ros::Publisher cv_ranges_pub;
 
@@ -171,6 +172,7 @@ class GapBarrier
 		double prev_time = current_time;
 		double time_ref = 0.0; 
 		double heading_beam_angle;
+		double sim_graph_time = 0.0;
 
 		//lidar-preprocessing
 		int scan_beams; double right_beam_angle, left_beam_angle;
@@ -199,6 +201,7 @@ class GapBarrier
 		visualization_msgs::Marker robs_marker;
 		visualization_msgs::Marker bez;
 		visualization_msgs::Marker vehicle_detect_path;
+		visualization_msgs::Marker vehicle_lidar_dir;
 
 		//steering & stop time
 		double vel;
@@ -550,7 +553,14 @@ class GapBarrier
 			robs=nf.advertise<visualization_msgs::Marker>("robs",2);
 			bez_mark=nf.advertise<visualization_msgs::Marker>("bez",2);
 			vehicle_detect=nf.advertise<visualization_msgs::Marker>("vehicle_detect",2);
+			vehicle_lidar=nf.advertise<visualization_msgs::Marker>("vehicle_lidar",2);
+
 			driver_pub = nf.advertise<ackermann_msgs::AckermannDriveStamped>(drive_topic, 1);
+
+			// Empty Files for Graphing Data
+			FILE *file1 = fopen("/home/gjsk/catkin_ws/Sim_Data/NEES.txt", "w");
+			fclose(file1);
+
 
 			if(use_camera)
 			{
@@ -1467,13 +1477,15 @@ class GapBarrier
 			for(int i=0; i<car_detects.size();i++){ //For each detection, plot trajectory over next 3 seconds	
 				if(car_detects[i].init<2) continue;
 				double x_det=car_detects[i].state[0]; double y_det=car_detects[i].state[1]; double theta_det=car_detects[i].state[2];
+				//double vel_det = car_detects[i].state[3]; double steer_det = car_detects[i].state[4];
+				double vel_det = odomvel; double steer_det = odomsteer;
 				
 				for (int traj=0;traj<40;traj++){
 					p7.x = x_det;	p7.y = y_det;	p7.z = 0;
 					vehicle_detect_path.points.push_back(p7);
-					x_det=x_det+car_detects[i].state[3]*cos(theta_det)/10; //0.1 second increments (coarse but just for visualization)
-					y_det=y_det+car_detects[i].state[3]*sin(theta_det)/10; //0.1 second increments
-					theta_det=theta_det+car_detects[i].state[3]/wheelbase*tan(car_detects[i].state[4])/10; //0.1 second increments
+					x_det=x_det+vel_det*cos(theta_det)/10; //0.1 second increments (coarse but just for visualization)
+					y_det=y_det+vel_det*sin(theta_det)/10; //0.1 second increments
+					theta_det=theta_det+vel_det/wheelbase*tan(steer_det)/10; //0.1 second increments
 					p7.x = x_det;	p7.y = y_det;	p7.z = 0;
 					vehicle_detect_path.points.push_back(p7);
 				}
@@ -1482,6 +1494,250 @@ class GapBarrier
 			vehicle_detect.publish(vehicle_detect_path);
 		}
 
+		void visualize_vehicle_lidar(double det_angle){
+			//Publish the detected vehicle(s) trajectory(s)
+			vehicle_lidar_dir.header.frame_id = base_frame;
+			vehicle_lidar_dir.header.stamp = ros::Time::now();
+			vehicle_lidar_dir.type = visualization_msgs::Marker::LINE_LIST;
+			vehicle_lidar_dir.id = 0; 
+			vehicle_lidar_dir.action = visualization_msgs::Marker::ADD;
+			vehicle_lidar_dir.scale.x = 0.1;
+			vehicle_lidar_dir.color.a = 1.0;
+			vehicle_lidar_dir.color.r = 0.9; 
+			vehicle_lidar_dir.color.g = 0.2;
+			vehicle_lidar_dir.color.b = 0.2;
+			vehicle_lidar_dir.pose.orientation.w = 1;
+			
+			vehicle_lidar_dir.lifetime = ros::Duration(0.1);
+			geometry_msgs::Point p7;
+			vehicle_lidar_dir.points.clear();
+
+			for(int i=0; i<car_detects.size();i++){ //For each detection, plot trajectory over next 3 seconds	
+				if(car_detects[i].init<2) continue;
+				// Center around ego vehicle 
+				double x_det=0; double y_det=0;
+				double dist_to_det = sqrt(pow(car_detects[i].state[0], 2) + pow(car_detects[i].state[1], 2));
+
+				for (int traj=0;traj<40;traj++){
+					p7.x = x_det;	p7.y = y_det;	p7.z = 0;
+					vehicle_lidar_dir.points.push_back(p7);
+					x_det=x_det+cos(det_angle)/10; //0.1 second increments (coarse but just for visualization)
+					y_det=y_det+sin(det_angle)/10; //0.1 second increments
+					// theta_det=theta_det+car_detects[i].state[3]/wheelbase*tan(car_detects[i].state[4])/10; //0.1 second increments
+					p7.x = x_det;	p7.y = y_det;	p7.z = 0;
+					vehicle_lidar_dir.points.push_back(p7);
+				}
+			}
+
+			vehicle_lidar.publish(vehicle_lidar_dir);
+		}
+
+		void EKF_general(int q, double dt){
+			// Run the extended kalman filter algorithm for unknown inputs of external vehicle (included in states)
+			// Expected output: Modified state estimate and covariance estimate
+			
+			// initial covariance and residual covariance
+			Eigen::MatrixXd cov_P = car_detects[q].cov_P;	
+			Eigen::MatrixXd H_jac = Eigen::MatrixXd::Identity(2, 5); 
+			Eigen::MatrixXd init_resid_cov = car_detects[q].meas_noise + H_jac * cov_P * H_jac.transpose();
+
+			
+			// State Prediction
+			Eigen::VectorXd pred_state = Eigen::VectorXd::Zero(5);	
+			Eigen::VectorXd x = car_detects[q].state;
+			double adj_dt = std::max(default_dt, dt);
+			pred_state(0) = x[0] + x[3]*cos(x[2])*adj_dt;
+			pred_state(1) = x[1] + x[3]*sin(x[2])*adj_dt;
+			pred_state(2) = x[2] + x[3]*tan(x[4])*adj_dt*(1/wheelbase);
+			pred_state(3) = x[3];
+			pred_state(4) = x[4];
+
+
+			// Measurement Residual
+			Eigen::VectorXd meas_resid = Eigen::VectorXd::Zero(2);
+			meas_resid(0) = car_detects[q].meas[0] - pred_state(0);	
+			meas_resid(1) = car_detects[q].meas[1] - pred_state(1);
+
+
+			// State Prediction Covariance
+			car_detects[q].proc_noise(0,0)=0.05; car_detects[q].proc_noise(1,1)=0.05; car_detects[q].proc_noise(2,2)=std::pow(7.5 * M_PI / 180, 2);
+			car_detects[q].proc_noise(3,3)=0.125; car_detects[q].proc_noise(4,4)=std::pow(7.5 * M_PI / 180, 2);
+
+			Eigen::MatrixXd F_jac = Eigen::MatrixXd::Identity(5,5);		// State Jacobian
+			F_jac(0,2) = -adj_dt*x[3]*sin(x[2]);
+			F_jac(1,2) =  adj_dt*x[3]*cos(x[2]);
+			F_jac(0,3) =  adj_dt*cos(x[2]);
+			F_jac(1,3) =  adj_dt*sin(x[2]);
+			F_jac(2,4) =  adj_dt*x[3]*(1/wheelbase)*(1/(pow(cos(x[4]),2)));
+			F_jac(2,3) =  adj_dt*tan(x[4])*(1/wheelbase);
+			Eigen::MatrixXd state_pred_cov = Eigen::MatrixXd::Zero(5,5);	// State Prediction Covariance
+			state_pred_cov = F_jac * car_detects[q].cov_P * (F_jac.transpose()) + car_detects[q].proc_noise;
+
+
+			// Residual Covariance
+			Eigen::MatrixXd resid_cov = Eigen::MatrixXd::Zero(2,2);
+			//Eigen::MatrixXd H_jac = Eigen::MatrixXd::Identity(2, 5);
+			resid_cov = car_detects[q].meas_noise + H_jac * state_pred_cov * (H_jac.transpose());
+
+			// Filter Gain
+			Eigen::MatrixXd kalman_gain = Eigen::MatrixXd::Zero(5,2);
+			kalman_gain = state_pred_cov * (H_jac.transpose()) * resid_cov.inverse();
+
+			// Updated state estimate and covariance
+			car_detects[q].state = pred_state + kalman_gain * meas_resid;
+			// Using Joseph form covariance update
+			Eigen::MatrixXd I = Eigen::MatrixXd::Identity(5,5);
+			car_detects[q].cov_P = (I - kalman_gain*H_jac)*state_pred_cov*((I - kalman_gain*H_jac).transpose()) + 
+									kalman_gain*(car_detects[q].meas_noise)*(kalman_gain.transpose());	
+
+			// Find NEES and NIS
+			// First, need actual state to compare to predicted state
+			Eigen::VectorXd real_state = Eigen::VectorXd::Zero(5);
+			real_state(0) = car_detects[q].meas[0];
+			real_state(1) = car_detects[q].meas[1];
+			real_state(2) = robtheta;
+			real_state(3) = odomvel;
+			real_state(4) = odomsteer;
+
+			// Find difference between real and predicted
+			Eigen::VectorXd state_err = real_state - pred_state;
+			
+			// Find the NEES of this filter
+			double NEES = (state_err.transpose()) * (cov_P.inverse()) * state_err;
+			std::cout << "NEES: " << NEES << std::endl;
+			if(NEES < 11.1 && NEES > 0){
+				std::cout << "Passed!" << std::endl;
+			} else{
+				std::cout << "Failed..." << std::endl;
+			}
+
+			// Find the NIS of this filter
+			double NIS = (meas_resid.transpose()) * (init_resid_cov.inverse()) * meas_resid;
+			std::cout << "NIS: " << NIS << std::endl;
+			if(NIS < 5.99 && NIS > 0){
+				std::cout << "Passed!" << std::endl;
+			} else{
+				std::cout << "Failed..." << std::endl;
+			}
+
+		}
+
+		void EKF_known_input(int q, double dt){
+			// Run the extended kalman filter algorithm for unknown inputs of external vehicle (included in states)
+			// Expected output: Modified state estimate and covariance estimate
+			
+			// initial covariance and residual covariance
+			Eigen::MatrixXd cov_P = Eigen::MatrixXd::Zero(3, 3);  
+			cov_P(0,0) = car_detects[q].cov_P(0,0);	
+			cov_P(0,1) = car_detects[q].cov_P(0,1);	
+			cov_P(0,2) = car_detects[q].cov_P(0,2);	
+			cov_P(1,0) = car_detects[q].cov_P(1,0);	
+			cov_P(1,1) = car_detects[q].cov_P(1,1);	
+			cov_P(1,2) = car_detects[q].cov_P(1,2);	
+			cov_P(2,0) = car_detects[q].cov_P(2,0);	
+			cov_P(2,1) = car_detects[q].cov_P(2,1);	
+			cov_P(2,2) = car_detects[q].cov_P(2,2);	
+			Eigen::MatrixXd H_jac = Eigen::MatrixXd::Identity(2, 3); 
+			Eigen::MatrixXd init_resid_cov = car_detects[q].meas_noise + H_jac * cov_P * H_jac.transpose();
+
+			// State Prediction
+			Eigen::VectorXd pred_state = Eigen::VectorXd::Zero(3);	
+			Eigen::VectorXd x = Eigen::VectorXd::Zero(3);
+			x(0) = car_detects[q].state[0];
+			x(1) = car_detects[q].state[1];
+			x(2) = car_detects[q].state[2];
+			Eigen::VectorXd in = Eigen::VectorXd::Zero(3);
+			in(0) = odomvel;
+			in(1) = odomsteer;
+			double adj_dt = std::max(default_dt, dt);
+			pred_state(0) = x[0] + in(0)*cos(x[2])*adj_dt;
+			pred_state(1) = x[1] + in(0)*sin(x[2])*adj_dt;
+			pred_state(2) = x[2] + in(0)*tan(in(1))*adj_dt*(1/wheelbase);
+
+			// Measurement Residual
+			Eigen::VectorXd meas_resid = Eigen::VectorXd::Zero(2);
+			meas_resid(0) = car_detects[q].meas[0] - pred_state(0);	
+			meas_resid(1) = car_detects[q].meas[1] - pred_state(1);
+
+			// State Prediction Covariance
+			car_detects[q].proc_noise(0,0)=0.05; car_detects[q].proc_noise(1,1)=0.05; car_detects[q].proc_noise(2,2)=std::pow(7.5 * M_PI / 180, 2);
+			Eigen::MatrixXd proc_noise = Eigen::MatrixXd::Zero(3, 3);	
+			proc_noise(0,0) = car_detects[q].proc_noise(0,0);			
+			proc_noise(1,1) = car_detects[q].proc_noise(1,1);	
+			proc_noise(2,2) = car_detects[q].proc_noise(2,2);	
+
+			//Measurement noise should depend on the distance between the vehicles (maybe error of 2% of distance, increases when speeds increase)
+			car_detects[q].meas_noise(0,0)=0.02*sqrt(std::pow(car_detects[q].meas[0],2)+std::pow(car_detects[q].meas[1],2));
+			car_detects[q].meas_noise(1,1)=car_detects[q].meas_noise(0,0);
+			
+			//Also incorporate speed's effect on error
+			//car_detects[q].meas_noise(0,0)*=std::max(vel_adapt*odomvel/0.5,1.0); car_detects[q].meas_noise(1,1)*=std::max(vel_adapt*odomvel/0.5,1.0);
+
+			Eigen::MatrixXd F_jac = Eigen::MatrixXd::Identity(3,3);		// State Jacobian
+			F_jac(0,2) = -adj_dt*in(0)*sin(x[2]);
+			F_jac(1,2) =  adj_dt*in(0)*cos(x[2]);
+			Eigen::MatrixXd state_pred_cov = Eigen::MatrixXd::Zero(3,3);	// State Prediction Covariance
+			state_pred_cov = F_jac * cov_P * (F_jac.transpose()) + proc_noise;
+
+			// Residual Covariance
+			Eigen::MatrixXd resid_cov = Eigen::MatrixXd::Zero(2,2);
+			//Eigen::MatrixXd H_jac = Eigen::MatrixXd::Identity(2, 5);
+			resid_cov = car_detects[q].meas_noise + H_jac * state_pred_cov * (H_jac.transpose());
+
+			// Filter Gain
+			Eigen::MatrixXd kalman_gain = Eigen::MatrixXd::Zero(3,2);
+			kalman_gain = state_pred_cov * (H_jac.transpose()) * resid_cov.inverse();
+
+			// Updated state estimate and covariance
+			Eigen::VectorXd updated_state = pred_state + kalman_gain * meas_resid;
+			car_detects[q].state(0) = updated_state(0);
+			car_detects[q].state(1) = updated_state(1);
+			car_detects[q].state(2) = updated_state(2);
+
+			// Using Joseph form covariance update
+			Eigen::MatrixXd I = Eigen::MatrixXd::Identity(3,3);
+			Eigen::MatrixXd updated_cov_P = Eigen::MatrixXd::Zero(3,3);
+			updated_cov_P = (I - kalman_gain*H_jac)*state_pred_cov*((I - kalman_gain*H_jac).transpose()) + 
+									kalman_gain*(car_detects[q].meas_noise)*(kalman_gain.transpose());	
+			car_detects[q].cov_P(0,0) = updated_cov_P(0,0);	
+			car_detects[q].cov_P(0,1) = updated_cov_P(0,1);	
+			car_detects[q].cov_P(0,2) = updated_cov_P(0,2);	
+			car_detects[q].cov_P(1,0) = updated_cov_P(1,0);	
+			car_detects[q].cov_P(1,1) = updated_cov_P(1,1);	
+			car_detects[q].cov_P(1,2) = updated_cov_P(1,2);	
+			car_detects[q].cov_P(2,0) = updated_cov_P(2,0);	
+			car_detects[q].cov_P(2,1) = updated_cov_P(2,1);	
+			car_detects[q].cov_P(2,2) = updated_cov_P(2,2);	
+
+			// Find NEES and NIS
+			// First, need actual state to compare to predicted state
+			Eigen::VectorXd real_state = Eigen::VectorXd::Zero(3);
+			real_state(0) = car_detects[q].meas[0];
+			real_state(1) = car_detects[q].meas[1];
+			real_state(2) = robtheta;
+
+			// Find difference between real and predicted
+			Eigen::VectorXd state_err = real_state - pred_state;
+			
+			// Find the NEES of this filter
+			double NEES = (state_err.transpose()) * (cov_P.inverse()) * state_err;
+			std::cout << "NEES: " << NEES << std::endl;
+			if(NEES < 11.1 && NEES > 0){
+				std::cout << "Passed!" << std::endl;
+			} else{
+				std::cout << "Failed..." << std::endl;
+			}
+
+			// Find the NIS of this filter
+			double NIS = (meas_resid.transpose()) * (init_resid_cov.inverse()) * meas_resid;
+			std::cout << "NIS: " << NIS << std::endl;
+			if(NIS < 5.99 && NIS > 0){
+				std::cout << "Passed!" << std::endl;
+			} else{
+				std::cout << "Failed..." << std::endl;
+			}
+
+		}
 
 
 		void lidar_callback(const sensor_msgs::LaserScanConstPtr &data){
@@ -1601,11 +1857,12 @@ class GapBarrier
 
 				// Try to find the scan beam which corresponds to the external vehicle's position (angle relative to us) 
 				// and compare it with the measured value (from tf)
+				// (In simulation lidar scan doesn't pick up other vehicles)
 				std::cout << "******************************************" << std::endl;
 				std::cout << "Measured Position: x = " << car_detects[q].meas[0] << "\t y = " << car_detects[q].meas[1] << std::endl;
 				std::cout << "State Position: x = " << car_detects[q].state[0] << "\t y = " << car_detects[q].state[1] << std::endl;
 				// double angle_to_ext_meas = atan2(car_detects[q].meas[1], car_detects[q].meas[0]); // Angle based on measurement
-				// double angle_to_ext_state = atan2(car_detects[q].state[1], car_detects[q].state[0]); // Angle based on measurement
+				// double angle_to_ext_state = atan2(car_detects[q].state[1], car_detects[q].state[0]); // Angle based on state
 				// std::cout << "Angle based on meas: " << angle_to_ext_meas << std::endl;
 				// int beam_index_m= std::floor(scan_beams*angle_to_ext_meas/(2*M_PI));
 				// int beam_index_s= std::floor(scan_beams*angle_to_ext_state/(2*M_PI));
@@ -1625,103 +1882,43 @@ class GapBarrier
 				std::cout << "Predicted Velocity: \t" << car_detects[q].state[3] << std::endl;
 				std::cout << "Ext. Vehicle Steering Angle: " << odomsteer << std::endl;
 				std::cout << "Predicted Steering Angle: " << car_detects[q].state[4] << std::endl;
-
+				// double angle_to_ext_state = atan2(car_detects[q].state[1], car_detects[q].state[0]);
+				// std::cout << "Angle based on state: " << angle_to_ext_state << std::endl;
+				// visualize_vehicle_lidar(angle_to_ext_state);
 
 
 				// At this point the usable variables are all the ones in car_detects[q]
 				// Measurement, state, covariance, process noise, measurement noise
 				// We also have t in the form of dt
 
-				// Expected output: Modified state estimate, covariance estimate, kalman gain, 
-				
-				// initial covariance and residual covariance
-				Eigen::MatrixXd cov_P = car_detects[q].cov_P;	
-				Eigen::MatrixXd H_jac = Eigen::MatrixXd::Identity(2, 5); 
-				Eigen::MatrixXd init_resid_cov = car_detects[q].meas_noise + H_jac * cov_P * H_jac.transpose();
-
-				
-				// State Prediction
-				Eigen::VectorXd pred_state = Eigen::VectorXd::Zero(5);	
-				Eigen::VectorXd x = car_detects[q].state;
-				double adj_dt = std::max(default_dt, dt);
-				pred_state(0) = x[0] + x[3]*cos(x[2])*adj_dt;
-				pred_state(1) = x[1] + x[3]*sin(x[2])*adj_dt;
-				pred_state(2) = x[2] + x[3]*tan(x[4])*adj_dt*(1/wheelbase);
-				pred_state(3) = x[3];
-				pred_state(4) = x[4];
-
-
-				// Measurement Residual
-				Eigen::VectorXd meas_resid = Eigen::VectorXd::Zero(2);
-				meas_resid(0) = car_detects[q].meas[0] - pred_state(0);	
-				meas_resid(1) = car_detects[q].meas[1] - pred_state(1);
-
-
-				// State Prediction Covariance
-				car_detects[q].proc_noise(0,0)=0.05; car_detects[q].proc_noise(1,1)=0.05; car_detects[q].proc_noise(2,2)=std::pow(7.5 * M_PI / 180, 2);
-				car_detects[q].proc_noise(3,3)=0.125; car_detects[q].proc_noise(4,4)=std::pow(7.5 * M_PI / 180, 2);
-
-				Eigen::MatrixXd F_jac = Eigen::MatrixXd::Identity(5,5);		// State Jacobian
-				F_jac(0,2) = -adj_dt*x[3]*sin(x[2]);
-				F_jac(1,2) =  adj_dt*x[3]*cos(x[2]);
-				F_jac(0,3) =  adj_dt*cos(x[2]);
-				F_jac(1,3) =  adj_dt*sin(x[2]);
-				F_jac(2,4) =  adj_dt*x[3]*(1/wheelbase)*(1/(pow(cos(x[4]),2)));
-				F_jac(2,3) =  adj_dt*tan(x[4])*(1/wheelbase);
-				Eigen::MatrixXd state_pred_cov = Eigen::MatrixXd::Zero(5,5);	// State Prediction Covariance
-				state_pred_cov = F_jac * car_detects[q].cov_P * (F_jac.transpose()) + car_detects[q].proc_noise;
-
-
-				// Residual Covariance
-				Eigen::MatrixXd resid_cov = Eigen::MatrixXd::Zero(2,2);
-				//Eigen::MatrixXd H_jac = Eigen::MatrixXd::Identity(2, 5);
-				resid_cov = car_detects[q].meas_noise + H_jac * state_pred_cov * (H_jac.transpose());
-
-				// Filter Gain
-				Eigen::MatrixXd kalman_gain = Eigen::MatrixXd::Zero(5,2);
-				kalman_gain = state_pred_cov * (H_jac.transpose()) * resid_cov.inverse();
-
-				// Updated state estimate and covariance
-				car_detects[q].state = pred_state + kalman_gain * meas_resid;
-				// Using Joseph form covariance update
-				Eigen::MatrixXd I = Eigen::MatrixXd::Identity(5,5);
-				car_detects[q].cov_P = (I - kalman_gain*H_jac)*state_pred_cov*((I - kalman_gain*H_jac).transpose()) + 
-										kalman_gain*(car_detects[q].meas_noise)*(kalman_gain.transpose());	
+				EKF_known_input(q, dt);
 
 				car_detects[q].last_det=0; // Reset detection, 
 
-				// Find NEES and NIS
-				// First, need actual state to compare to predicted state
-				Eigen::VectorXd real_state = Eigen::VectorXd::Zero(5);
-				real_state(0) = car_detects[q].meas[0];
-				real_state(1) = car_detects[q].meas[1];
-				real_state(2) = robtheta;
-				real_state(3) = odomvel;
-				real_state(4) = odomsteer;
+				// if(sim_graph_time < 10) { 
+				// 	// At the end of each time sample, collect simulation data for graphing
+				// 	// Position Estimate Vs. True
 
-				// Find difference between real and predicted
-				Eigen::VectorXd state_err = real_state - pred_state;
-				
-				// Find the NEES of this filter
-				double NEES = (state_err.transpose()) * (cov_P.inverse()) * state_err;
-				std::cout << "NEES: " << NEES << std::endl;
-				if(NEES < 11.1 && NEES > 0){
-					std::cout << "Passed!" << std::endl;
-				} else{
-					std::cout << "Failed..." << std::endl;
-				}
+				// 	// Heading Angle Vs. True
 
-				// Find the NIS of this filter
-				double NIS = (meas_resid.transpose()) * (init_resid_cov.inverse()) * meas_resid;
-				std::cout << "NIS: " << NIS << std::endl;
-				if(NIS < 5.99 && NIS > 0){
-					std::cout << "Passed!" << std::endl;
-				} else{
-					std::cout << "Failed..." << std::endl;
-				}
+				// 	// Velocity Estimate Vs. True
+
+				// 	// Steering Angle Estimate Vs. True
+
+				// 	// Predicted Vs. Updated Variance for each parameter
+
+				// 	// NEES 
+				// 	FILE *file1 = fopen("/home/gjsk/catkin_ws/Sim_Data/NEES.txt", "a");
+				// 	fprintf(file1,"%lf, %lf\n",sim_graph_time,NEES);
+				// 	fclose(file1);
+				// 	// NIS
+
+				// 	sim_graph_time += dt;
+				// }
+
 
 			}
-			 
+			
 			lastx=odomx; lasty=odomy; lasttheta=odomtheta; //Keep our vehicle frame from last cycle to transform frame to new this cycle
 			if(simx!=0){lastx=simx; lasty=simy; lasttheta=simtheta;}
 			timestamp_tf2=timestamp_tf1; timestamp_cam2=timestamp_cam1;
