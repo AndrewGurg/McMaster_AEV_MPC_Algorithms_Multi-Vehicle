@@ -60,8 +60,8 @@
     </node>
 
     <node pkg="f1tenth_simulator" name="vehicle_detector" type="vehicle_detection" output="screen">
-    <rosparam command="load" file="$(find f1tenth_simulator)/params_ego.yaml"/>
-  </node>
+      <rosparam command="load" file="$(find f1tenth_simulator)/params_ego.yaml"/>
+    </node>
 
   </group>
 
@@ -83,9 +83,9 @@
       <rosparam command="load" file="$(find f1tenth_simulator)/params_ego.yaml"/>
     </node>
 
-    <!-- <node pkg="f1tenth_simulator" name="navigation_fast_QBMPC" type="navigation_fast_QBMPC" output="screen">
+    <node pkg="f1tenth_simulator" name="navigation_fast_QBMPC" type="navigation_fast_QBMPC" output="screen">
       <rosparam command="load" file="$(find f1tenth_simulator)/params_ext.yaml"/>
-    </node> -->
+    </node>
 
   </group>
 

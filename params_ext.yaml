@@ -133,7 +133,7 @@ keyboard_steer_ang: .3  # radians
 obstacle_size: 2
 
 # The names of topics to listen and publish to
-joy_topic: "/racecar2/joy"
+joy_topic: "/joy"
 drive_topic: "/racecar2/drive" #Change to /drive for normal control from joy
 map_topic: "/map"
 distance_transform_topic: "/dt"

@@ -390,7 +390,7 @@ public:
         } else if (msg.data == nav_key_char) {
             // nav
             toggle_mux(nav_mux_idx, "Navigation");
-        } else if (msg.data == "1" or msg.data =="2"){
+        } else if (msg.data == "1" or msg.data =="2"){ // Add more characters here for more vehicles
             // Switching vehicle (convert char to int)
             switch_vehicle(std::stoi(msg.data));
         }
