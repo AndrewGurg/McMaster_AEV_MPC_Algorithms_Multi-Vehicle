@@ -49,6 +49,7 @@
 #include <cmath> //M_PI, round
 #include <sstream>
 #include <algorithm>
+#include <random> // Simulating measurements
 
 #include <QuadProg++.hh>
 #undef inverse // Remove the conflicting macro
@@ -166,6 +167,15 @@ class GapBarrier
 
 		// tf frames
 		std::string map_frame, base_frame, scan_frame, odom_frame, tf_prefix, ext_prefix;
+
+		// Kalman Filter Parameters
+		std::string EKF_mode; 
+		// Noise generation
+		double dep_std_dev;
+		double ang_std_dev;
+		std::mt19937 noise_generator;
+		std::normal_distribution<double> noise_dep;
+		std::normal_distribution<double> noise_ang;
 
 		//time
 		double current_time = ros::Time::now().toSec();
@@ -357,6 +367,15 @@ class GapBarrier
 
 			nf.getParam("speed_to_erpm_gain", speed_to_erpm_gain);
 			nf.getParam("speed_to_erpm_offset", speed_to_erpm_offset);
+
+			// Get EKF type and simulated noise
+			nf.getParam("EKF_mode", EKF_mode);
+			nf.getParam("dep_std_dev", dep_std_dev);
+       		nf.getParam("ang_std_dev", ang_std_dev);
+
+			noise_generator = std::mt19937(std::random_device{}());
+ 			noise_dep = std::normal_distribution<double>(0., dep_std_dev);
+ 			noise_ang = std::normal_distribution<double>(0., ang_std_dev);
 
 
 			        // Get the transformation frame names
@@ -671,6 +690,10 @@ class GapBarrier
 					double w=transform.transform.rotation.w;
 					robtheta = atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z));
 
+					// Adding noise to external vehicle position measurements
+					robx += noise_dep(noise_generator);
+					roby += noise_dep(noise_generator);
+					robtheta += noise_ang(noise_generator);
 					double detx=(robx-simx)*cos(simtheta)+(roby-simy)*sin(simtheta);
 					double dety=-(robx-simx)*sin(simtheta)+(roby-simy)*cos(simtheta);
 
@@ -1480,8 +1503,8 @@ class GapBarrier
 			for(int i=0; i<car_detects.size();i++){ //For each detection, plot trajectory over next 3 seconds	
 				if(car_detects[i].init<2) continue;
 				double x_det=car_detects[i].state[0]; double y_det=car_detects[i].state[1]; double theta_det=car_detects[i].state[2];
-				//double vel_det = car_detects[i].state[3]; double steer_det = car_detects[i].state[4];
-				double vel_det = odomvel; double steer_det = odomsteer;
+				double vel_det = car_detects[i].state[3]; double steer_det = car_detects[i].state[4];
+				//double vel_det = odomvel; double steer_det = odomsteer;
 				
 				for (int traj=0;traj<40;traj++){
 					p7.x = x_det;	p7.y = y_det;	p7.z = 0;
@@ -1623,13 +1646,13 @@ class GapBarrier
 				std::cout << "Failed..." << std::endl;
 			}
 
-			if(sim_graph_time < 10) { 
+			if(sim_graph_time < 50) { 
 				// At the end of each time sample, collect simulation data for graphing
 				// Position, Heading Estimate Vs. True
 				FILE *file_states = fopen("/home/gjsk/catkin_ws/Sim_Data/states.txt", "a");
 				fprintf(file_states,"%lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", sim_graph_time, 
 						car_detects[q].state[0], real_state(0), car_detects[q].state[1], real_state(1), car_detects[q].state[2], real_state(2), 
-						car_detects[q].state[3], real_state(3), car_detects[q].state[4], real_state(4),);
+						car_detects[q].state[3], real_state(3), car_detects[q].state[4], real_state(4));
 				fclose(file_states);
 				// Velocity Estimate Vs. True
 
@@ -1637,7 +1660,7 @@ class GapBarrier
 
 				// Predicted Vs. Updated Variance for each parameter
 				FILE *file_var = fopen("/home/gjsk/catkin_ws/Sim_Data/variance.txt", "a");
-				fprintf(file_states,"%lf, %lf, %lf, %lf\n", sim_graph_time, 
+				fprintf(file_states,"%lf, %lf, %lf, %lf, %lf, %lf\n", sim_graph_time, 
 						car_detects[q].cov_P(0,0), car_detects[q].cov_P(1,1), car_detects[q].cov_P(2,2), car_detects[q].cov_P(3,3), car_detects[q].cov_P(4,4));
 				fclose(file_var);
 				// NEES 
@@ -1764,7 +1787,7 @@ class GapBarrier
 				std::cout << "Failed..." << std::endl;
 			}
 
-			if(sim_graph_time < 10) { 
+			if(sim_graph_time < 50) { 
 				// At the end of each time sample, collect simulation data for graphing
 				// Position, Heading Estimate Vs. True
 				FILE *file_states = fopen("/home/gjsk/catkin_ws/Sim_Data/states.txt", "a");
@@ -1904,28 +1927,12 @@ class GapBarrier
 					curmeasy=car_detects[q].meas[1];
 				}
 
-
-				// Try to find the scan beam which corresponds to the external vehicle's position (angle relative to us) 
-				// and compare it with the measured value (from tf)
-				// (In simulation lidar scan doesn't pick up other vehicles)
+				// Diagnostics io stream
 				std::cout << "******************************************" << std::endl;
 				std::cout << "Measured Position: x = " << car_detects[q].meas[0] << "\t y = " << car_detects[q].meas[1] << std::endl;
 				std::cout << "State Position: x = " << car_detects[q].state[0] << "\t y = " << car_detects[q].state[1] << std::endl;
-				// double angle_to_ext_meas = atan2(car_detects[q].meas[1], car_detects[q].meas[0]); // Angle based on measurement
-				// double angle_to_ext_state = atan2(car_detects[q].state[1], car_detects[q].state[0]); // Angle based on state
-				// std::cout << "Angle based on meas: " << angle_to_ext_meas << std::endl;
-				// int beam_index_m= std::floor(scan_beams*angle_to_ext_meas/(2*M_PI));
-				// int beam_index_s= std::floor(scan_beams*angle_to_ext_state/(2*M_PI));
-				// std::cout << "Beam Index based on meas: " << beam_index_m << std::endl;
-				// std::cout << "Beam Index based on state: " << beam_index_s << std::endl;
-				// float lidar_range_m = data->ranges[beam_index_m];
-				// float lidar_range_s = data->ranges[beam_index_s];
-				// std::cout << "Lidar Range based on meas: " << lidar_range_m << std::endl;
-				// std::cout << "Lidar Range based on state: " << lidar_range_s << std::endl;
-				// float meas_dist = sqrt(pow(car_detects[q].meas[0], 2) + pow(car_detects[q].meas[1], 2));
-				// float state_dist = sqrt(pow(car_detects[q].state[0], 2) + pow(car_detects[q].state[1], 2));
-				// std::cout << "Measured Distance: " << meas_dist << std::endl;
-				// std::cout << "State Distance: " << state_dist << std::endl;
+				std::cout << "Actual Velocity: " << odomvel << std::endl;
+				if(EKF_mode == "general"){std::cout << "Estimated Velocity: " << car_detects[q].state[3] << std::endl;}
 				std::cout << "Ext. Vehicle Heading Angle: \t" << robtheta << std::endl;
 				std::cout << "Predicted Heading Angle: \t" << car_detects[q].state[2] << std::endl;
 				std::cout << "Ext. Vehicle Velocity: \t" << odomvel << std::endl;
@@ -1941,30 +1948,14 @@ class GapBarrier
 				// Measurement, state, covariance, process noise, measurement noise
 				// We also have t in the form of dt
 
-				EKF_known_input(q, dt);
+				if (EKF_mode == "general"){
+					EKF_general(q, dt);
+				}
+				else if(EKF_mode == "known_in"){
+					EKF_known_input(q,dt);
+				}
 
 				car_detects[q].last_det=0; // Reset detection, 
-
-				// if(sim_graph_time < 10) { 
-				// 	// At the end of each time sample, collect simulation data for graphing
-				// 	// Position Estimate Vs. True
-
-				// 	// Heading Angle Vs. True
-
-				// 	// Velocity Estimate Vs. True
-
-				// 	// Steering Angle Estimate Vs. True
-
-				// 	// Predicted Vs. Updated Variance for each parameter
-
-				// 	// NEES 
-				// 	FILE *file1 = fopen("/home/gjsk/catkin_ws/Sim_Data/NEES.txt", "a");
-				// 	fprintf(file1,"%lf, %lf\n",sim_graph_time,NEES);
-				// 	fclose(file1);
-				// 	// NIS
-
-				// 	sim_graph_time += dt;
-				// }
 
 
 			}

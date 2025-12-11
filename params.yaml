@@ -182,6 +182,11 @@ tf_prefix: ""
 broadcast_transform: true
 publish_ground_truth_pose: true
 
+# EKF Params
+EKF_mode: "known_in" # 'general' for 5 state vars, 'known_in' for 3
+# The standard deviation of the noise applied to the depth camera simulation
+dep_std_dev: 0.05 # meters
+ang_std_dev: rad(2*pi/180) # radians
 
 # Ackermann to VESC parameters
 
