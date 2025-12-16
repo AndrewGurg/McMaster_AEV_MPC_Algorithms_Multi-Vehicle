@@ -173,6 +173,9 @@ class GapBarrier
 		// Noise generation
 		double dep_std_dev;
 		double ang_std_dev;
+		double pos_proc_noise_var;
+		double ang_proc_noise_var;
+		double vel_proc_noise_var;
 		std::mt19937 noise_generator;
 		std::normal_distribution<double> noise_dep;
 		std::normal_distribution<double> noise_ang;
@@ -259,6 +262,7 @@ class GapBarrier
 		double simx=0, simy=0, simtheta=0;
 		double robtheta=0;
 		std::vector<tf_data> past_tf;
+		double real_detx=0, real_dety=0; // Real relative position of external vehicle, for simulation only
 
 		//MPC MAP localization parameters
 		std::vector<std::vector<double>> map_pts;
@@ -372,6 +376,9 @@ class GapBarrier
 			nf.getParam("EKF_mode", EKF_mode);
 			nf.getParam("dep_std_dev", dep_std_dev);
        		nf.getParam("ang_std_dev", ang_std_dev);
+       		nf.getParam("pos_proc_noise_var", pos_proc_noise_var);
+       		nf.getParam("ang_proc_noise_var", ang_proc_noise_var);
+       		nf.getParam("vel_proc_noise_var", vel_proc_noise_var);
 
 			noise_generator = std::mt19937(std::random_device{}());
  			noise_dep = std::normal_distribution<double>(0., dep_std_dev);
@@ -689,13 +696,17 @@ class GapBarrier
 					double z=transform.transform.rotation.z;
 					double w=transform.transform.rotation.w;
 					robtheta = atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z));
+					double tempx = robx;
+					double tempy= roby;
 
 					// Adding noise to external vehicle position measurements
 					robx += noise_dep(noise_generator);
 					roby += noise_dep(noise_generator);
-					robtheta += noise_ang(noise_generator);
+					//robtheta += noise_ang(noise_generator);
 					double detx=(robx-simx)*cos(simtheta)+(roby-simy)*sin(simtheta);
 					double dety=-(robx-simx)*sin(simtheta)+(roby-simy)*cos(simtheta);
+					real_detx=(tempx-simx)*cos(simtheta)+(tempy-simy)*sin(simtheta);
+					real_dety=-(tempx-simx)*sin(simtheta)+(tempy-simy)*cos(simtheta);					
 
 					tf_data new_tf;
 					new_tf.tf_x=simx; new_tf.tf_y=simy; new_tf.tf_theta=simtheta; new_tf.tf_time=ros::Time::now().toSec();
@@ -1562,10 +1573,10 @@ class GapBarrier
 			// Run the extended kalman filter algorithm for unknown inputs of external vehicle (included in states)
 			// Expected output: Modified state estimate and covariance estimate
 			
-			// initial covariance and residual covariance
+			// initial covariance and Innovation covariance
 			Eigen::MatrixXd cov_P = car_detects[q].cov_P;	
-			Eigen::MatrixXd H_jac = Eigen::MatrixXd::Identity(2, 5); 
-			Eigen::MatrixXd init_resid_cov = car_detects[q].meas_noise + H_jac * cov_P * H_jac.transpose();
+			// Eigen::MatrixXd H_jac = Eigen::MatrixXd::Identity(2, 5); 
+			// Eigen::MatrixXd init_innov_cov = car_detects[q].meas_noise + H_jac * cov_P * H_jac.transpose();
 
 			
 			// State Prediction
@@ -1579,38 +1590,40 @@ class GapBarrier
 			pred_state(4) = x[4];
 
 
-			// Measurement Residual
-			Eigen::VectorXd meas_resid = Eigen::VectorXd::Zero(2);
-			meas_resid(0) = car_detects[q].meas[0] - pred_state(0);	
-			meas_resid(1) = car_detects[q].meas[1] - pred_state(1);
+			// Innovation
+			Eigen::VectorXd innov = Eigen::VectorXd::Zero(2);
+			innov(0) = car_detects[q].meas[0] - pred_state(0);	
+			innov(1) = car_detects[q].meas[1] - pred_state(1);
 
 
 			// State Prediction Covariance
-			car_detects[q].proc_noise(0,0)=0.05; car_detects[q].proc_noise(1,1)=0.05; car_detects[q].proc_noise(2,2)=std::pow(7.5 * M_PI / 180, 2);
-			car_detects[q].proc_noise(3,3)=0.125; car_detects[q].proc_noise(4,4)=std::pow(7.5 * M_PI / 180, 2);
+			car_detects[q].proc_noise(0,0)=pos_proc_noise_var; car_detects[q].proc_noise(1,1)=pos_proc_noise_var; car_detects[q].proc_noise(2,2)=std::pow(ang_proc_noise_var * M_PI / 180, 2);
+			car_detects[q].proc_noise(3,3)=vel_proc_noise_var; car_detects[q].proc_noise(4,4)=std::pow(ang_proc_noise_var * M_PI / 180, 2);
 
 			Eigen::MatrixXd F_jac = Eigen::MatrixXd::Identity(5,5);		// State Jacobian
-			F_jac(0,2) = -adj_dt*x[3]*sin(x[2]);
-			F_jac(1,2) =  adj_dt*x[3]*cos(x[2]);
-			F_jac(0,3) =  adj_dt*cos(x[2]);
-			F_jac(1,3) =  adj_dt*sin(x[2]);
-			F_jac(2,4) =  adj_dt*x[3]*(1/wheelbase)*(1/(pow(cos(x[4]),2)));
-			F_jac(2,3) =  adj_dt*tan(x[4])*(1/wheelbase);
+			F_jac(0,2) = -adj_dt*pred_state(3)*sin(pred_state(2));
+			F_jac(1,2) =  adj_dt*pred_state(3)*cos(pred_state(2));
+			F_jac(0,3) =  adj_dt*cos(pred_state(2));
+			F_jac(1,3) =  adj_dt*sin(pred_state(2));
+			F_jac(2,4) =  adj_dt*pred_state(3)*(1/wheelbase)*(1/(pow(cos(pred_state(4)),2)));
+			F_jac(2,3) =  adj_dt*tan(pred_state(4))*(1/wheelbase);
 			Eigen::MatrixXd state_pred_cov = Eigen::MatrixXd::Zero(5,5);	// State Prediction Covariance
-			state_pred_cov = F_jac * car_detects[q].cov_P * (F_jac.transpose()) + car_detects[q].proc_noise;
+			state_pred_cov = F_jac * car_detects[q].cov_P * (F_jac.transpose()) + (car_detects[q].proc_noise);
 
 
-			// Residual Covariance
-			Eigen::MatrixXd resid_cov = Eigen::MatrixXd::Zero(2,2);
-			//Eigen::MatrixXd H_jac = Eigen::MatrixXd::Identity(2, 5);
-			resid_cov = car_detects[q].meas_noise + H_jac * state_pred_cov * (H_jac.transpose());
+			// Innovation Covariance
+			Eigen::MatrixXd innov_cov = Eigen::MatrixXd::Zero(2,2);
+			Eigen::MatrixXd H_jac = Eigen::MatrixXd::Identity(2, 5);
+			innov_cov = car_detects[q].meas_noise + H_jac * state_pred_cov * (H_jac.transpose());
 
 			// Filter Gain
 			Eigen::MatrixXd kalman_gain = Eigen::MatrixXd::Zero(5,2);
-			kalman_gain = state_pred_cov * (H_jac.transpose()) * resid_cov.inverse();
+			kalman_gain = state_pred_cov * (H_jac.transpose()) * innov_cov.inverse();
 
 			// Updated state estimate and covariance
-			car_detects[q].state = pred_state + kalman_gain * meas_resid;
+			car_detects[q].state = pred_state + (kalman_gain * innov);
+			while(car_detects[q].state[2]>M_PI) car_detects[q].state[2]-=2*M_PI;
+			while(car_detects[q].state[2]<-M_PI) car_detects[q].state[2]+=2*M_PI;
 			// Using Joseph form covariance update
 			Eigen::MatrixXd I = Eigen::MatrixXd::Identity(5,5);
 			car_detects[q].cov_P = (I - kalman_gain*H_jac)*state_pred_cov*((I - kalman_gain*H_jac).transpose()) + 
@@ -1619,14 +1632,16 @@ class GapBarrier
 			// Find NEES and NIS
 			// First, need actual state to compare to predicted state
 			Eigen::VectorXd real_state = Eigen::VectorXd::Zero(5);
-			real_state(0) = car_detects[q].meas[0];
-			real_state(1) = car_detects[q].meas[1];
+			real_state(0) = real_detx;
+			real_state(1) = real_dety;
 			real_state(2) = robtheta;
 			real_state(3) = odomvel;
 			real_state(4) = odomsteer;
 
 			// Find difference between real and predicted
 			Eigen::VectorXd state_err = real_state - pred_state;
+			while(state_err(2)>M_PI)  state_err(2)-=2*M_PI;
+			while(state_err(2)<-M_PI) state_err(2)+=2*M_PI;
 			
 			// Find the NEES of this filter
 			double NEES = (state_err.transpose()) * (cov_P.inverse()) * state_err;
@@ -1638,7 +1653,7 @@ class GapBarrier
 			}
 
 			// Find the NIS of this filter
-			double NIS = (meas_resid.transpose()) * (init_resid_cov.inverse()) * meas_resid;
+			double NIS = (innov.transpose()) * (innov_cov.inverse()) * innov;
 			std::cout << "NIS: " << NIS << std::endl;
 			if(NIS < 5.99 && NIS > 0){
 				std::cout << "Passed!" << std::endl;
@@ -1646,7 +1661,7 @@ class GapBarrier
 				std::cout << "Failed..." << std::endl;
 			}
 
-			if(sim_graph_time < 50) { 
+			if(sim_graph_time > 5 && sim_graph_time < 55) { 
 				// At the end of each time sample, collect simulation data for graphing
 				// Position, Heading Estimate Vs. True
 				FILE *file_states = fopen("/home/gjsk/catkin_ws/Sim_Data/states.txt", "a");
@@ -1667,8 +1682,8 @@ class GapBarrier
 				FILE *file_nees = fopen("/home/gjsk/catkin_ws/Sim_Data/NEES_NIS.txt", "a");
 				fprintf(file_nees,"%lf, %lf, %lf\n",sim_graph_time,NEES,NIS);
 				fclose(file_nees);
-				sim_graph_time += dt;
 			}
+			sim_graph_time += dt;
 
 		}
 
@@ -1676,7 +1691,7 @@ class GapBarrier
 			// Run the extended kalman filter algorithm for unknown inputs of external vehicle (included in states)
 			// Expected output: Modified state estimate and covariance estimate
 			
-			// initial covariance and residual covariance
+			// initial covariance and innovation covariance
 			Eigen::MatrixXd cov_P = Eigen::MatrixXd::Zero(3, 3);  
 			cov_P(0,0) = car_detects[q].cov_P(0,0);	
 			cov_P(0,1) = car_detects[q].cov_P(0,1);	
@@ -1687,8 +1702,8 @@ class GapBarrier
 			cov_P(2,0) = car_detects[q].cov_P(2,0);	
 			cov_P(2,1) = car_detects[q].cov_P(2,1);	
 			cov_P(2,2) = car_detects[q].cov_P(2,2);	
-			Eigen::MatrixXd H_jac = Eigen::MatrixXd::Identity(2, 3); 
-			Eigen::MatrixXd init_resid_cov = car_detects[q].meas_noise + H_jac * cov_P * H_jac.transpose();
+			//Eigen::MatrixXd H_jac = Eigen::MatrixXd::Identity(2, 3); 
+			//Eigen::MatrixXd init_innov_cov = car_detects[q].meas_noise + H_jac * cov_P * H_jac.transpose();
 
 			// State Prediction
 			Eigen::VectorXd pred_state = Eigen::VectorXd::Zero(3);	
@@ -1704,45 +1719,48 @@ class GapBarrier
 			pred_state(1) = x[1] + in(0)*sin(x[2])*adj_dt;
 			pred_state(2) = x[2] + in(0)*tan(in(1))*adj_dt*(1/wheelbase);
 
-			// Measurement Residual
-			Eigen::VectorXd meas_resid = Eigen::VectorXd::Zero(2);
-			meas_resid(0) = car_detects[q].meas[0] - pred_state(0);	
-			meas_resid(1) = car_detects[q].meas[1] - pred_state(1);
+			// Innovation
+			Eigen::VectorXd innov = Eigen::VectorXd::Zero(2);
+			innov(0) = car_detects[q].meas[0] - pred_state(0);	
+			innov(1) = car_detects[q].meas[1] - pred_state(1);
 
 			// State Prediction Covariance
-			car_detects[q].proc_noise(0,0)=0.05; car_detects[q].proc_noise(1,1)=0.05; car_detects[q].proc_noise(2,2)=std::pow(7.5 * M_PI / 180, 2);
+			car_detects[q].proc_noise(0,0)=pos_proc_noise_var; car_detects[q].proc_noise(1,1)=pos_proc_noise_var; car_detects[q].proc_noise(2,2)=std::pow(ang_proc_noise_var * M_PI / 180, 2);
 			Eigen::MatrixXd proc_noise = Eigen::MatrixXd::Zero(3, 3);	
 			proc_noise(0,0) = car_detects[q].proc_noise(0,0);			
 			proc_noise(1,1) = car_detects[q].proc_noise(1,1);	
 			proc_noise(2,2) = car_detects[q].proc_noise(2,2);	
 
-			//Measurement noise should depend on the distance between the vehicles (maybe error of 2% of distance, increases when speeds increase)
-			car_detects[q].meas_noise(0,0)=0.02*sqrt(std::pow(car_detects[q].meas[0],2)+std::pow(car_detects[q].meas[1],2));
-			car_detects[q].meas_noise(1,1)=car_detects[q].meas_noise(0,0);
+			// //Measurement noise should depend on the distance between the vehicles (maybe error of 2% of distance, increases when speeds increase)
+			// car_detects[q].meas_noise(0,0)=0.02*sqrt(std::pow(car_detects[q].meas[0],2)+std::pow(car_detects[q].meas[1],2));
+			// car_detects[q].meas_noise(1,1)=car_detects[q].meas_noise(0,0);
 			
 			//Also incorporate speed's effect on error
 			//car_detects[q].meas_noise(0,0)*=std::max(vel_adapt*odomvel/0.5,1.0); car_detects[q].meas_noise(1,1)*=std::max(vel_adapt*odomvel/0.5,1.0);
 
 			Eigen::MatrixXd F_jac = Eigen::MatrixXd::Identity(3,3);		// State Jacobian
-			F_jac(0,2) = -adj_dt*in(0)*sin(x[2]);
-			F_jac(1,2) =  adj_dt*in(0)*cos(x[2]);
+			F_jac(0,2) = -adj_dt*in(0)*sin(pred_state(2));
+			F_jac(1,2) =  adj_dt*in(0)*cos(pred_state(2));
 			Eigen::MatrixXd state_pred_cov = Eigen::MatrixXd::Zero(3,3);	// State Prediction Covariance
 			state_pred_cov = F_jac * cov_P * (F_jac.transpose()) + proc_noise;
 
-			// Residual Covariance
-			Eigen::MatrixXd resid_cov = Eigen::MatrixXd::Zero(2,2);
-			//Eigen::MatrixXd H_jac = Eigen::MatrixXd::Identity(2, 5);
-			resid_cov = car_detects[q].meas_noise + H_jac * state_pred_cov * (H_jac.transpose());
+			// Innovation Covariance
+			Eigen::MatrixXd innov_cov = Eigen::MatrixXd::Zero(2,2);
+			Eigen::MatrixXd H_jac = Eigen::MatrixXd::Identity(2, 3);
+			innov_cov = car_detects[q].meas_noise + H_jac * state_pred_cov * (H_jac.transpose());
 
 			// Filter Gain
 			Eigen::MatrixXd kalman_gain = Eigen::MatrixXd::Zero(3,2);
-			kalman_gain = state_pred_cov * (H_jac.transpose()) * resid_cov.inverse();
+			kalman_gain = state_pred_cov * (H_jac.transpose()) * innov_cov.inverse();
 
 			// Updated state estimate and covariance
-			Eigen::VectorXd updated_state = pred_state + kalman_gain * meas_resid;
+			Eigen::VectorXd updated_state = pred_state + kalman_gain * innov;
 			car_detects[q].state(0) = updated_state(0);
 			car_detects[q].state(1) = updated_state(1);
 			car_detects[q].state(2) = updated_state(2);
+
+			while(car_detects[q].state[2]>M_PI) car_detects[q].state[2]-=2*M_PI;
+			while(car_detects[q].state[2]<-M_PI) car_detects[q].state[2]+=2*M_PI;
 
 			// Using Joseph form covariance update
 			Eigen::MatrixXd I = Eigen::MatrixXd::Identity(3,3);
@@ -1762,24 +1780,26 @@ class GapBarrier
 			// Find NEES and NIS
 			// First, need actual state to compare to predicted state
 			Eigen::VectorXd real_state = Eigen::VectorXd::Zero(3);
-			real_state(0) = car_detects[q].meas[0];
-			real_state(1) = car_detects[q].meas[1];
+			real_state(0) = real_detx;
+			real_state(1) = real_dety;
 			real_state(2) = robtheta;
 
 			// Find difference between real and predicted
 			Eigen::VectorXd state_err = real_state - pred_state;
+			while(state_err(2)>M_PI)  state_err(2)-=2*M_PI;
+			while(state_err(2)<-M_PI) state_err(2)+=2*M_PI;
 			
 			// Find the NEES of this filter
 			double NEES = (state_err.transpose()) * (cov_P.inverse()) * state_err;
 			std::cout << "NEES: " << NEES << std::endl;
-			if(NEES < 11.1 && NEES > 0){
+			if(NEES < 7.81 && NEES > 0){
 				std::cout << "Passed!" << std::endl;
 			} else{
 				std::cout << "Failed..." << std::endl;
 			}
 
 			// Find the NIS of this filter
-			double NIS = (meas_resid.transpose()) * (init_resid_cov.inverse()) * meas_resid;
+			double NIS = (innov.transpose()) * (innov_cov.inverse()) * innov;
 			std::cout << "NIS: " << NIS << std::endl;
 			if(NIS < 5.99 && NIS > 0){
 				std::cout << "Passed!" << std::endl;
@@ -1787,7 +1807,7 @@ class GapBarrier
 				std::cout << "Failed..." << std::endl;
 			}
 
-			if(sim_graph_time < 50) { 
+			if(sim_graph_time > 5 && sim_graph_time < 55) { 
 				// At the end of each time sample, collect simulation data for graphing
 				// Position, Heading Estimate Vs. True
 				FILE *file_states = fopen("/home/gjsk/catkin_ws/Sim_Data/states.txt", "a");
@@ -1807,9 +1827,8 @@ class GapBarrier
 				FILE *file_nees = fopen("/home/gjsk/catkin_ws/Sim_Data/NEES_NIS.txt", "a");
 				fprintf(file_nees,"%lf, %lf, %lf\n",sim_graph_time,NEES,NIS);
 				fclose(file_nees);
-				sim_graph_time += dt;
 			}
-
+			sim_graph_time += dt;
 		}
 
 
