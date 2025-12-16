@@ -262,7 +262,7 @@ class GapBarrier
 		double simx=0, simy=0, simtheta=0;
 		double robtheta=0;
 		std::vector<tf_data> past_tf;
-		double real_detx=0, real_dety=0; // Real relative position of external vehicle, for simulation only
+		double real_detx=0, real_dety=0, real_dettheta=0; // Real relative position of external vehicle, for simulation only
 
 		//MPC MAP localization parameters
 		std::vector<std::vector<double>> map_pts;
@@ -706,7 +706,10 @@ class GapBarrier
 					double detx=(robx-simx)*cos(simtheta)+(roby-simy)*sin(simtheta);
 					double dety=-(robx-simx)*sin(simtheta)+(roby-simy)*cos(simtheta);
 					real_detx=(tempx-simx)*cos(simtheta)+(tempy-simy)*sin(simtheta);
-					real_dety=-(tempx-simx)*sin(simtheta)+(tempy-simy)*cos(simtheta);					
+					real_dety=-(tempx-simx)*sin(simtheta)+(tempy-simy)*cos(simtheta);	
+					real_dettheta = robtheta-simtheta;
+					while(real_dettheta>M_PI)  real_dettheta-=2*M_PI;
+					while(real_dettheta<-M_PI) real_dettheta+=2*M_PI;
 
 					tf_data new_tf;
 					new_tf.tf_x=simx; new_tf.tf_y=simy; new_tf.tf_theta=simtheta; new_tf.tf_time=ros::Time::now().toSec();
@@ -1634,7 +1637,7 @@ class GapBarrier
 			Eigen::VectorXd real_state = Eigen::VectorXd::Zero(5);
 			real_state(0) = real_detx;
 			real_state(1) = real_dety;
-			real_state(2) = robtheta;
+			real_state(2) = real_dettheta;
 			real_state(3) = odomvel;
 			real_state(4) = odomsteer;
 
@@ -1661,7 +1664,7 @@ class GapBarrier
 				std::cout << "Failed..." << std::endl;
 			}
 
-			if(sim_graph_time > 5 && sim_graph_time < 55) { 
+			if(sim_graph_time < 55) { 
 				// At the end of each time sample, collect simulation data for graphing
 				// Position, Heading Estimate Vs. True
 				FILE *file_states = fopen("/home/gjsk/catkin_ws/Sim_Data/states.txt", "a");
@@ -1782,7 +1785,7 @@ class GapBarrier
 			Eigen::VectorXd real_state = Eigen::VectorXd::Zero(3);
 			real_state(0) = real_detx;
 			real_state(1) = real_dety;
-			real_state(2) = robtheta;
+			real_state(2) = real_dettheta;
 
 			// Find difference between real and predicted
 			Eigen::VectorXd state_err = real_state - pred_state;
@@ -1901,7 +1904,8 @@ class GapBarrier
 
 
 					car_detects[q].state[4]=0; //steering angle, depends on process noise
-					car_detects[q].state[3]=std::min(sqrt(pow(curmeasx-car_detects[q].state[0],2)+pow(curmeasy-car_detects[q].state[1],2))/dt,0.3); //Cap initial at 3 m/s so we don't get extreme values upon initialization
+					//Clip initial between 3 m/s and 0 so we don't get extreme or negative values upon initialization, add small bias toward positive velocity to avoid negative velocity & rotated heading angle
+					car_detects[q].state[3]=std::max(std::min(sqrt(pow(curmeasx-car_detects[q].state[0],2)+pow(curmeasy-car_detects[q].state[1],2))/dt,3.0), 0.0) + 0.1; 
 					car_detects[q].state[2]=atan2(curmeasy-car_detects[q].state[1],curmeasx-car_detects[q].state[0]);
 					car_detects[q].state[1]=curmeasy;
 					car_detects[q].state[0]=curmeasx;
@@ -1952,12 +1956,13 @@ class GapBarrier
 				std::cout << "State Position: x = " << car_detects[q].state[0] << "\t y = " << car_detects[q].state[1] << std::endl;
 				std::cout << "Actual Velocity: " << odomvel << std::endl;
 				if(EKF_mode == "general"){std::cout << "Estimated Velocity: " << car_detects[q].state[3] << std::endl;}
-				std::cout << "Ext. Vehicle Heading Angle: \t" << robtheta << std::endl;
-				std::cout << "Predicted Heading Angle: \t" << car_detects[q].state[2] << std::endl;
-				std::cout << "Ext. Vehicle Velocity: \t" << odomvel << std::endl;
-				std::cout << "Predicted Velocity: \t" << car_detects[q].state[3] << std::endl;
-				std::cout << "Ext. Vehicle Steering Angle: " << odomsteer << std::endl;
-				std::cout << "Predicted Steering Angle: " << car_detects[q].state[4] << std::endl;
+				// std::cout << "Ext. Vehicle abs. heading Angle: \t" << robtheta << std::endl;
+				// std::cout << "Ext. Vehicle real heading Angle: \t" << real_dettheta << std::endl;
+				// std::cout << "Predicted Heading Angle: \t" << car_detects[q].state[2] << std::endl;
+				// std::cout << "Ext. Vehicle Velocity: \t" << odomvel << std::endl;
+				// std::cout << "Predicted Velocity: \t" << car_detects[q].state[3] << std::endl;
+				// std::cout << "Ext. Vehicle Steering Angle: " << odomsteer << std::endl;
+				// std::cout << "Predicted Steering Angle: " << car_detects[q].state[4] << std::endl;
 				// double angle_to_ext_state = atan2(car_detects[q].state[1], car_detects[q].state[0]);
 				// std::cout << "Angle based on state: " << angle_to_ext_state << std::endl;
 				// visualize_vehicle_lidar(angle_to_ext_state);
