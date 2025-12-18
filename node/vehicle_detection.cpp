@@ -129,6 +129,8 @@ class GapBarrier
 		ros::Subscriber tf_sub;
 		ros::Subscriber map_sub;
 		ros::Subscriber yolo_sub;
+		ros::Subscriber key_sub;
+
 
 		//More CV data members, used if use_camera is true
 		ros::Subscriber depth_img;
@@ -163,7 +165,7 @@ class GapBarrier
 		
 		//topics
 		std::string depth_image_topic, depth_info_topic, cv_ranges_topic, depth_index_topic, color_image_topic, color_info_topic, cam_extr_topic,
-		depth_points_topic,lidarscan_topic, drive_topic, odom_topic, mux_topic, imu_topic, map_topic, yolo_data_topic, ext_drive_topic;
+		depth_points_topic,lidarscan_topic, drive_topic, odom_topic, mux_topic, imu_topic, map_topic, yolo_data_topic, ext_drive_topic, key_topic;
 
 		// tf frames
 		std::string map_frame, base_frame, scan_frame, odom_frame, tf_prefix, ext_prefix;
@@ -186,6 +188,7 @@ class GapBarrier
 		double time_ref = 0.0; 
 		double heading_beam_angle;
 		double sim_graph_time = 0.0;
+		double sim_data_collect = false;
 
 		//lidar-preprocessing
 		int scan_beams; double right_beam_angle, left_beam_angle;
@@ -369,6 +372,8 @@ class GapBarrier
 			nf.getParam("map_topic", map_topic);
 			nf.getParam("yolo_data_topic", yolo_data_topic);
 
+			nf.getParam("keyboard_topic", key_topic);
+
 			nf.getParam("speed_to_erpm_gain", speed_to_erpm_gain);
 			nf.getParam("speed_to_erpm_offset", speed_to_erpm_offset);
 
@@ -401,7 +406,6 @@ class GapBarrier
 			else{
 				ext_prefix = "racecarX/";
 			}
-			std::cout << "External car prefix: " << ext_prefix + "base_link" << std::endl;
 
 			// Subscribe to external drive topic to get actual velocity and steering angle commands
 			ext_drive_topic = ext_prefix + drive_topic; 
@@ -568,6 +572,7 @@ class GapBarrier
 			yolo_sub=nf.subscribe(yolo_data_topic, 1, &GapBarrier::yolo_callback, this);
 			
 			ext_odom = nf.subscribe("/"+ext_prefix+"odom",1, &GapBarrier::ext_odom_callback, this);
+			key_sub = nf.subscribe(key_topic, 1, &GapBarrier::key_callback, this);
 
 
 			//publications
@@ -1491,8 +1496,13 @@ class GapBarrier
 		}
 
 
-		
-		
+		void key_callback(const std_msgs::String & msg) {
+			// Receives messages to activate data collection for simulation
+			if (msg.data == "p") {
+				// Forward
+				sim_data_collect = true; // a good speed for keyboard control
+			}
+		}
 
 		void visualize_detections(){
 			//This should occur whether or not we are in autonomous mode
@@ -1649,22 +1659,22 @@ class GapBarrier
 			// Find the NEES of this filter
 			double NEES = (state_err.transpose()) * (cov_P.inverse()) * state_err;
 			std::cout << "NEES: " << NEES << std::endl;
-			if(NEES < 11.1 && NEES > 0){
-				std::cout << "Passed!" << std::endl;
-			} else{
-				std::cout << "Failed..." << std::endl;
-			}
+			// if(NEES < 11.1 && NEES > 0){
+			// 	std::cout << "Passed!" << std::endl;
+			// } else{
+			// 	std::cout << "Failed..." << std::endl;
+			// }
 
 			// Find the NIS of this filter
 			double NIS = (innov.transpose()) * (innov_cov.inverse()) * innov;
 			std::cout << "NIS: " << NIS << std::endl;
-			if(NIS < 5.99 && NIS > 0){
-				std::cout << "Passed!" << std::endl;
-			} else{
-				std::cout << "Failed..." << std::endl;
-			}
+			// if(NIS < 5.99 && NIS > 0){
+			// 	std::cout << "Passed!" << std::endl;
+			// } else{
+			// 	std::cout << "Failed..." << std::endl;
+			// }
 
-			if(sim_graph_time < 55) { 
+			if(sim_data_collect && sim_graph_time < 50) { 
 				// At the end of each time sample, collect simulation data for graphing
 				// Position, Heading Estimate Vs. True
 				FILE *file_states = fopen("/home/gjsk/catkin_ws/Sim_Data/states.txt", "a");
@@ -1685,8 +1695,9 @@ class GapBarrier
 				FILE *file_nees = fopen("/home/gjsk/catkin_ws/Sim_Data/NEES_NIS.txt", "a");
 				fprintf(file_nees,"%lf, %lf, %lf\n",sim_graph_time,NEES,NIS);
 				fclose(file_nees);
+				sim_graph_time += dt;
 			}
-			sim_graph_time += dt;
+			
 
 		}
 
@@ -1795,22 +1806,22 @@ class GapBarrier
 			// Find the NEES of this filter
 			double NEES = (state_err.transpose()) * (cov_P.inverse()) * state_err;
 			std::cout << "NEES: " << NEES << std::endl;
-			if(NEES < 7.81 && NEES > 0){
-				std::cout << "Passed!" << std::endl;
-			} else{
-				std::cout << "Failed..." << std::endl;
-			}
+			// if(NEES < 7.81 && NEES > 0){
+			// 	std::cout << "Passed!" << std::endl;
+			// } else{
+			// 	std::cout << "Failed..." << std::endl;
+			// }
 
 			// Find the NIS of this filter
 			double NIS = (innov.transpose()) * (innov_cov.inverse()) * innov;
 			std::cout << "NIS: " << NIS << std::endl;
-			if(NIS < 5.99 && NIS > 0){
-				std::cout << "Passed!" << std::endl;
-			} else{
-				std::cout << "Failed..." << std::endl;
-			}
+			// if(NIS < 5.99 && NIS > 0){
+			// 	std::cout << "Passed!" << std::endl;
+			// } else{
+			// 	std::cout << "Failed..." << std::endl;
+			// }
 
-			if(sim_graph_time > 5 && sim_graph_time < 55) { 
+			if(sim_data_collect && sim_graph_time < 50) { 
 				// At the end of each time sample, collect simulation data for graphing
 				// Position, Heading Estimate Vs. True
 				FILE *file_states = fopen("/home/gjsk/catkin_ws/Sim_Data/states.txt", "a");
@@ -1830,8 +1841,9 @@ class GapBarrier
 				FILE *file_nees = fopen("/home/gjsk/catkin_ws/Sim_Data/NEES_NIS.txt", "a");
 				fprintf(file_nees,"%lf, %lf, %lf\n",sim_graph_time,NEES,NIS);
 				fclose(file_nees);
+				sim_graph_time += dt;
 			}
-			sim_graph_time += dt;
+			
 		}
 
 
@@ -1951,11 +1963,16 @@ class GapBarrier
 				}
 
 				// Diagnostics io stream
-				std::cout << "******************************************" << std::endl;
-				std::cout << "Measured Position: x = " << car_detects[q].meas[0] << "\t y = " << car_detects[q].meas[1] << std::endl;
-				std::cout << "State Position: x = " << car_detects[q].state[0] << "\t y = " << car_detects[q].state[1] << std::endl;
-				std::cout << "Actual Velocity: " << odomvel << std::endl;
-				if(EKF_mode == "general"){std::cout << "Estimated Velocity: " << car_detects[q].state[3] << std::endl;}
+				if(sim_data_collect){
+					std::cout << "*******************" << std::endl;
+					std::cout << "Collecting Data..." << std::endl;
+					std::cout << "Sim Graph Time: " << sim_graph_time << std::endl;
+				}
+				// std::cout << "******************************************" << std::endl;
+				// std::cout << "Measured Position: x = " << car_detects[q].meas[0] << "\t y = " << car_detects[q].meas[1] << std::endl;
+				// std::cout << "State Position: x = " << car_detects[q].state[0] << "\t y = " << car_detects[q].state[1] << std::endl;
+				// std::cout << "Actual Velocity: " << odomvel << std::endl;
+				// if(EKF_mode == "general"){std::cout << "Estimated Velocity: " << car_detects[q].state[3] << std::endl;}
 				// std::cout << "Ext. Vehicle abs. heading Angle: \t" << robtheta << std::endl;
 				// std::cout << "Ext. Vehicle real heading Angle: \t" << real_dettheta << std::endl;
 				// std::cout << "Predicted Heading Angle: \t" << car_detects[q].state[2] << std::endl;
