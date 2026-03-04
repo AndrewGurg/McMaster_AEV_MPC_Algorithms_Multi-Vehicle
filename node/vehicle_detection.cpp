@@ -1651,52 +1651,42 @@ class GapBarrier
 			real_state(3) = odomvel;
 			real_state(4) = odomsteer;
 
-			// Find difference between real and predicted
-			Eigen::VectorXd state_err = real_state - pred_state;
-			while(state_err(2)>M_PI)  state_err(2)-=2*M_PI;
-			while(state_err(2)<-M_PI) state_err(2)+=2*M_PI;
+			// // Find difference between real and predicted
+			// Eigen::VectorXd state_err = real_state - pred_state;
+			// while(state_err(2)>M_PI)  state_err(2)-=2*M_PI;
+			// while(state_err(2)<-M_PI) state_err(2)+=2*M_PI;
 			
-			// Find the NEES of this filter
-			double NEES = (state_err.transpose()) * (cov_P.inverse()) * state_err;
-			std::cout << "NEES: " << NEES << std::endl;
-			// if(NEES < 11.1 && NEES > 0){
-			// 	std::cout << "Passed!" << std::endl;
-			// } else{
-			// 	std::cout << "Failed..." << std::endl;
+			// // Find the NEES of this filter
+			// double NEES = (state_err.transpose()) * (cov_P.inverse()) * state_err;
+			// std::cout << "NEES: " << NEES << std::endl
+
+			// // Find the NIS of this filter
+			// double NIS = (innov.transpose()) * (innov_cov.inverse()) * innov;
+			// std::cout << "NIS: " << NIS << std::endl;
+
+			// if(sim_data_collect && sim_graph_time < 50) { 
+			// 	// At the end of each time sample, collect simulation data for graphing
+			// 	// Position, Heading Estimate Vs. True
+			// 	FILE *file_states = fopen("/home/gjsk/catkin_ws/Sim_Data/states.txt", "a");
+			// 	fprintf(file_states,"%lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", sim_graph_time, 
+			// 			car_detects[q].state[0], real_state(0), car_detects[q].state[1], real_state(1), car_detects[q].state[2], real_state(2), 
+			// 			car_detects[q].state[3], real_state(3), car_detects[q].state[4], real_state(4));
+			// 	fclose(file_states);
+			// 	// Velocity Estimate Vs. True
+
+			// 	// Steering Angle Estimate Vs. True
+
+			// 	// Predicted Vs. Updated Variance for each parameter
+			// 	FILE *file_var = fopen("/home/gjsk/catkin_ws/Sim_Data/variance.txt", "a");
+			// 	fprintf(file_states,"%lf, %lf, %lf, %lf, %lf, %lf\n", sim_graph_time, 
+			// 			car_detects[q].cov_P(0,0), car_detects[q].cov_P(1,1), car_detects[q].cov_P(2,2), car_detects[q].cov_P(3,3), car_detects[q].cov_P(4,4));
+			// 	fclose(file_var);
+			// 	// NEES 
+			// 	FILE *file_nees = fopen("/home/gjsk/catkin_ws/Sim_Data/NEES_NIS.txt", "a");
+			// 	fprintf(file_nees,"%lf, %lf, %lf\n",sim_graph_time,NEES,NIS);
+			// 	fclose(file_nees);
+			// 	sim_graph_time += dt;
 			// }
-
-			// Find the NIS of this filter
-			double NIS = (innov.transpose()) * (innov_cov.inverse()) * innov;
-			std::cout << "NIS: " << NIS << std::endl;
-			// if(NIS < 5.99 && NIS > 0){
-			// 	std::cout << "Passed!" << std::endl;
-			// } else{
-			// 	std::cout << "Failed..." << std::endl;
-			// }
-
-			if(sim_data_collect && sim_graph_time < 50) { 
-				// At the end of each time sample, collect simulation data for graphing
-				// Position, Heading Estimate Vs. True
-				FILE *file_states = fopen("/home/gjsk/catkin_ws/Sim_Data/states.txt", "a");
-				fprintf(file_states,"%lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", sim_graph_time, 
-						car_detects[q].state[0], real_state(0), car_detects[q].state[1], real_state(1), car_detects[q].state[2], real_state(2), 
-						car_detects[q].state[3], real_state(3), car_detects[q].state[4], real_state(4));
-				fclose(file_states);
-				// Velocity Estimate Vs. True
-
-				// Steering Angle Estimate Vs. True
-
-				// Predicted Vs. Updated Variance for each parameter
-				FILE *file_var = fopen("/home/gjsk/catkin_ws/Sim_Data/variance.txt", "a");
-				fprintf(file_states,"%lf, %lf, %lf, %lf, %lf, %lf\n", sim_graph_time, 
-						car_detects[q].cov_P(0,0), car_detects[q].cov_P(1,1), car_detects[q].cov_P(2,2), car_detects[q].cov_P(3,3), car_detects[q].cov_P(4,4));
-				fclose(file_var);
-				// NEES 
-				FILE *file_nees = fopen("/home/gjsk/catkin_ws/Sim_Data/NEES_NIS.txt", "a");
-				fprintf(file_nees,"%lf, %lf, %lf\n",sim_graph_time,NEES,NIS);
-				fclose(file_nees);
-				sim_graph_time += dt;
-			}
 			
 
 		}
@@ -1798,51 +1788,51 @@ class GapBarrier
 			real_state(1) = real_dety;
 			real_state(2) = real_dettheta;
 
-			// Find difference between real and predicted
-			Eigen::VectorXd state_err = real_state - pred_state;
-			while(state_err(2)>M_PI)  state_err(2)-=2*M_PI;
-			while(state_err(2)<-M_PI) state_err(2)+=2*M_PI;
+			// // Find difference between real and predicted
+			// Eigen::VectorXd state_err = real_state - pred_state;
+			// while(state_err(2)>M_PI)  state_err(2)-=2*M_PI;
+			// while(state_err(2)<-M_PI) state_err(2)+=2*M_PI;
 			
-			// Find the NEES of this filter
-			double NEES = (state_err.transpose()) * (cov_P.inverse()) * state_err;
-			std::cout << "NEES: " << NEES << std::endl;
-			// if(NEES < 7.81 && NEES > 0){
-			// 	std::cout << "Passed!" << std::endl;
-			// } else{
-			// 	std::cout << "Failed..." << std::endl;
+			// // Find the NEES of this filter
+			// double NEES = (state_err.transpose()) * (cov_P.inverse()) * state_err;
+			// std::cout << "NEES: " << NEES << std::endl;
+			// // if(NEES < 7.81 && NEES > 0){
+			// // 	std::cout << "Passed!" << std::endl;
+			// // } else{
+			// // 	std::cout << "Failed..." << std::endl;
+			// // }
+
+			// // Find the NIS of this filter
+			// double NIS = (innov.transpose()) * (innov_cov.inverse()) * innov;
+			// std::cout << "NIS: " << NIS << std::endl;
+			// // if(NIS < 5.99 && NIS > 0){
+			// // 	std::cout << "Passed!" << std::endl;
+			// // } else{
+			// // 	std::cout << "Failed..." << std::endl;
+			// // }
+
+			// if(sim_data_collect && sim_graph_time < 50) { 
+			// 	// At the end of each time sample, collect simulation data for graphing
+			// 	// Position, Heading Estimate Vs. True
+			// 	FILE *file_states = fopen("/home/gjsk/catkin_ws/Sim_Data/states.txt", "a");
+			// 	fprintf(file_states,"%lf, %lf, %lf, %lf, %lf, %lf, %lf\n", sim_graph_time, 
+			// 			car_detects[q].state[0], real_state(0), car_detects[q].state[1], real_state(1), car_detects[q].state[2], real_state(2));
+			// 	fclose(file_states);
+			// 	// Velocity Estimate Vs. True
+
+			// 	// Steering Angle Estimate Vs. True
+
+			// 	// Predicted Vs. Updated Variance for each parameter
+			// 	FILE *file_var = fopen("/home/gjsk/catkin_ws/Sim_Data/variance.txt", "a");
+			// 	fprintf(file_states,"%lf, %lf, %lf, %lf\n", sim_graph_time, 
+			// 			car_detects[q].cov_P(0,0), car_detects[q].cov_P(1,1), car_detects[q].cov_P(2,2));
+			// 	fclose(file_var);
+			// 	// NEES 
+			// 	FILE *file_nees = fopen("/home/gjsk/catkin_ws/Sim_Data/NEES_NIS.txt", "a");
+			// 	fprintf(file_nees,"%lf, %lf, %lf\n",sim_graph_time,NEES,NIS);
+			// 	fclose(file_nees);
+			// 	sim_graph_time += dt;
 			// }
-
-			// Find the NIS of this filter
-			double NIS = (innov.transpose()) * (innov_cov.inverse()) * innov;
-			std::cout << "NIS: " << NIS << std::endl;
-			// if(NIS < 5.99 && NIS > 0){
-			// 	std::cout << "Passed!" << std::endl;
-			// } else{
-			// 	std::cout << "Failed..." << std::endl;
-			// }
-
-			if(sim_data_collect && sim_graph_time < 50) { 
-				// At the end of each time sample, collect simulation data for graphing
-				// Position, Heading Estimate Vs. True
-				FILE *file_states = fopen("/home/gjsk/catkin_ws/Sim_Data/states.txt", "a");
-				fprintf(file_states,"%lf, %lf, %lf, %lf, %lf, %lf, %lf\n", sim_graph_time, 
-						car_detects[q].state[0], real_state(0), car_detects[q].state[1], real_state(1), car_detects[q].state[2], real_state(2));
-				fclose(file_states);
-				// Velocity Estimate Vs. True
-
-				// Steering Angle Estimate Vs. True
-
-				// Predicted Vs. Updated Variance for each parameter
-				FILE *file_var = fopen("/home/gjsk/catkin_ws/Sim_Data/variance.txt", "a");
-				fprintf(file_states,"%lf, %lf, %lf, %lf\n", sim_graph_time, 
-						car_detects[q].cov_P(0,0), car_detects[q].cov_P(1,1), car_detects[q].cov_P(2,2));
-				fclose(file_var);
-				// NEES 
-				FILE *file_nees = fopen("/home/gjsk/catkin_ws/Sim_Data/NEES_NIS.txt", "a");
-				fprintf(file_nees,"%lf, %lf, %lf\n",sim_graph_time,NEES,NIS);
-				fclose(file_nees);
-				sim_graph_time += dt;
-			}
 			
 		}
 
@@ -1968,22 +1958,6 @@ class GapBarrier
 					std::cout << "Collecting Data..." << std::endl;
 					std::cout << "Sim Graph Time: " << sim_graph_time << std::endl;
 				}
-				// std::cout << "******************************************" << std::endl;
-				// std::cout << "Measured Position: x = " << car_detects[q].meas[0] << "\t y = " << car_detects[q].meas[1] << std::endl;
-				// std::cout << "State Position: x = " << car_detects[q].state[0] << "\t y = " << car_detects[q].state[1] << std::endl;
-				// std::cout << "Actual Velocity: " << odomvel << std::endl;
-				// if(EKF_mode == "general"){std::cout << "Estimated Velocity: " << car_detects[q].state[3] << std::endl;}
-				// std::cout << "Ext. Vehicle abs. heading Angle: \t" << robtheta << std::endl;
-				// std::cout << "Ext. Vehicle real heading Angle: \t" << real_dettheta << std::endl;
-				// std::cout << "Predicted Heading Angle: \t" << car_detects[q].state[2] << std::endl;
-				// std::cout << "Ext. Vehicle Velocity: \t" << odomvel << std::endl;
-				// std::cout << "Predicted Velocity: \t" << car_detects[q].state[3] << std::endl;
-				// std::cout << "Ext. Vehicle Steering Angle: " << odomsteer << std::endl;
-				// std::cout << "Predicted Steering Angle: " << car_detects[q].state[4] << std::endl;
-				// double angle_to_ext_state = atan2(car_detects[q].state[1], car_detects[q].state[0]);
-				// std::cout << "Angle based on state: " << angle_to_ext_state << std::endl;
-				// visualize_vehicle_lidar(angle_to_ext_state);
-
 
 				// At this point the usable variables are all the ones in car_detects[q]
 				// Measurement, state, covariance, process noise, measurement noise
@@ -1997,7 +1971,6 @@ class GapBarrier
 				}
 
 				car_detects[q].last_det=0; // Reset detection, 
-
 
 			}
 			
