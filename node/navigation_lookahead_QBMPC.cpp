@@ -89,7 +89,7 @@ struct tf_data
 struct vehicle_detection
 {
 	int init=0; //Whether the KF for this detetction has been initialized
-	std::vector<int> bound_box={0,0,0,0}; //The CNN bounding box for the last cycle to try to match appropriately in the case of multi-detection
+	std::vector<float> bound_box={0,0,0,0}; //The CNN bounding box for the last cycle to try to match appropriately in the case of multi-detection
 	//{miny, minx, maxy, maxx}
 	std::vector<double> meas={0.0,0.0}; //The most recent measurement of x & y for the vehicle detected
 	tf_data meas_tf; //The tf corresponding to the last measurement time, to align frames in KF
@@ -119,7 +119,7 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
         xopt[1][i] = raw_data[2*i + 1];
     }
 
-	int bez_ctrl_pts=xopt[1][0]; //Order of the Bezier Curve
+	//int bez_ctrl_pts=xopt[1][0]; //Order of the Bezier Curve
 	int bez_curv_pts=xopt[0][1]; //Discretized points on our curve
 	double bez_alpha=xopt[1][1]; //Shaping of the exponential decay for further points
 	double x1=xopt[0][2]; //These are fixed by initial conditions and thus aren't variables in optimization
@@ -144,7 +144,7 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 
 	double funcreturn=0.0;
 	if(grad){
-		for(int i=0;i<n;i++){
+		for(unsigned i=0;i<n;i++){
 			grad[i]=0.0;
 		}
 	}
@@ -202,7 +202,7 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
         xopt[1][i] = raw_data[2*i + 1];
     }
 
-	int bez_ctrl_pts=xopt[1][0]; //Order of the Bezier Curve
+	//int bez_ctrl_pts=xopt[1][0]; //Order of the Bezier Curve
 	int bez_curv_pts=xopt[0][1]; //Discretized points on our curve
 	int bez_beta=xopt[1][1]; //Large value to use softmin function which is differentiable (different from alpha used in myfunc)
 	double x1=xopt[0][2]; //These are fixed by initial conditions and thus aren't variables in optimization
@@ -215,10 +215,6 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 	double t_end=xopt[1][5]; //Temporal scaling of the Bezier Curve
 	double wheelbase=xopt[0][6]; //Physical constant property of vehicle
 	double bez_min_dist=xopt[1][6]; //Our constraint on minimum distance to an obstacle
-	double theta_band_smooth=xopt[0][7];
-	double theta_band_diff=xopt[1][7];
-	double vel_beta=xopt[0][8];
-	double stop_dist_decay=xopt[1][8];
 	std::vector<std::vector<double>> bez_curv;
 	//Optimization variables:
 	//[0] -> x2
@@ -242,7 +238,7 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 	}
 
 	if(grad){
-		for(int i=0;i<n*m;i++){
+		for(unsigned i=0;i<n*m;i++){
 			grad[i]=0;
 		}
 	}
@@ -373,7 +369,7 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 			}
 		}
 		if(grad){
-			double myval=grad[(num_cons*i+8)*n];
+
 			grad[(num_cons*i+8)*n]=-grad[(num_cons*i+8)*n]/result[9*i+8];
 			grad[(num_cons*i+8)*n+1]=-grad[(num_cons*i+8)*n+1]/result[9*i+8];
 			grad[(num_cons*i+8)*n+2]=-grad[(num_cons*i+8)*n+2]/result[9*i+8];
@@ -381,85 +377,10 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 			grad[(num_cons*i+8)*n+4]=-grad[(num_cons*i+8)*n+4]/result[9*i+8];
 		}
 
-		double myval=result[9*i+8];
 		result[9*i+8]=1.0/double(bez_beta)*log(result[9*i+8])+bez_min_dist;
 
-		// ADDED BEYOND THIS POINT //
 	
-		// //Smooth minimum obstacle distance
-		// for(int j=0;j<cols-7;j++){
-		// 	double dist1= pow(pow(bez_curv[i][0]-xopt[0][j+9],2)+pow(bez_curv[i][1]-xopt[1][j+9],2),0.5); //Euclidean distance
-		// 	result[num_cons*i+8]=result[num_cons*i+8]+exp(-1.0*double(bez_beta)*dist1);
-
-		// 	if(grad){
-		// /*x2*/	grad[(num_cons*i+8)*n]=grad[(num_cons*i+8)*n]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+9])/dist1*px2;
-		// /*x3*/	grad[(num_cons*i+8)*n+1]=grad[(num_cons*i+8)*n+1]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+9])/dist1*px3;
-		// /*y3*/	grad[(num_cons*i+8)*n+2]=grad[(num_cons*i+8)*n+2]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+9])/dist1*py3;
-		// /*x4*/	grad[(num_cons*i+8)*n+3]=grad[(num_cons*i+8)*n+3]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+9])/dist1*px4;
-		// /*y4*/	grad[(num_cons*i+8)*n+4]=grad[(num_cons*i+8)*n+4]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+9])/dist1*py4;
-		// 	}
-
-		// // Velocity limiting helper values
-		// 	double theta_head=atan2(y_dot,x_dot);
-		// 	double theta1=atan2(-bez_curv[i][1]+xopt[1][j+9],-bez_curv[i][0]+xopt[0][j+9]);
-		// 	double theta_diff=atan2(sin(theta1-theta_head),cos(theta1-theta_head));
-		// 	double theta_band=1/(1+exp(-theta_band_smooth*(theta_diff+theta_band_diff))) - 1/(1+exp(-theta_band_smooth*(theta_diff-theta_band_diff)));
-		// 	result[num_cons*i+9]=result[num_cons*i+9]+exp(-vel_beta*dist1)*theta_band;
-
-		// 	if(grad){
-		// 		double distdx=-vel_beta*exp(-vel_beta*dist1)/dist1*(bez_curv[i][0]-xopt[0][j+9]);
-		// 		double distdy=-vel_beta*exp(-vel_beta*dist1)/dist1*(bez_curv[i][1]-xopt[1][j+9]);
-		// 		double dtheta_band=(exp(-theta_band_smooth*(theta_diff+theta_band_diff)))/pow(1+exp(-theta_band_smooth*(theta_diff+theta_band_diff)),2) - (exp(-theta_band_smooth*(theta_diff-theta_band_diff)))/pow(1+exp(-theta_band_smooth*(theta_diff-theta_band_diff)),2);
-		// 		double dthetadiffx=(bez_curv[i][1]-xopt[1][j+9])/(pow(bez_curv[i][0]-xopt[0][j+9],2)+pow(bez_curv[i][1]-xopt[1][j+9],2));
-		// 		double dthetadiffy=-(bez_curv[i][0]-xopt[0][j+9])/(pow(bez_curv[i][0]-xopt[0][j+9],2)+pow(bez_curv[i][1]-xopt[1][j+9],2));
-		// 		double dthetaheadx=(-y_dot/(pow(x_dot,2)+pow(y_dot,2)))*(x_ddot/x_dot);
-		// 		double dthetaheady=(x_dot/(pow(x_dot,2)+pow(y_dot,2)))*(y_ddot/y_dot);
-
-		// 		/*x2*/grad[(num_cons*i+9)*n]	= grad[(num_cons*i+9)*n]   + (distdx*theta_band+exp(-vel_beta*dist1)*dtheta_band*theta_band_smooth*(dthetadiffx+dthetaheadx))*px2; //x2
-		// 		/*x3*/grad[(num_cons*i+9)*n+1] 	= grad[(num_cons*i+9)*n+1] + (distdx*theta_band+exp(-vel_beta*dist1)*dtheta_band*theta_band_smooth*(dthetadiffx+dthetaheadx))*px3; //x3
-		// 		/*y3*/grad[(num_cons*i+9)*n+2]	= grad[(num_cons*i+9)*n+2] + (distdy*theta_band+exp(-vel_beta*dist1)*dtheta_band*theta_band_smooth*(dthetadiffy+dthetaheady))*py3; //y3
-		// 		/*x4*/grad[(num_cons*i+9)*n+3] 	= grad[(num_cons*i+9)*n+3] + (distdx*theta_band+exp(-vel_beta*dist1)*dtheta_band*theta_band_smooth*(dthetadiffx+dthetaheadx))*px4; //x4
-		// 		/*y4*/grad[(num_cons*i+9)*n+4]	= grad[(num_cons*i+9)*n+4] + (distdy*theta_band+exp(-vel_beta*dist1)*dtheta_band*theta_band_smooth*(dthetadiffy+dthetaheady))*py4; //y4
-		// 	}
-
-		// }
-
-		// if(grad){
-		// 	double myval=grad[(num_cons*i+8)*n];
-		// 	grad[(num_cons*i+8)*n]  =-grad[(num_cons*i+8)*n]/result[num_cons*i+8];
-		// 	grad[(num_cons*i+8)*n+1]=-grad[(num_cons*i+8)*n+1]/result[num_cons*i+8];
-		// 	grad[(num_cons*i+8)*n+2]=-grad[(num_cons*i+8)*n+2]/result[num_cons*i+8];
-		// 	grad[(num_cons*i+8)*n+3]=-grad[(num_cons*i+8)*n+3]/result[num_cons*i+8];
-		// 	grad[(num_cons*i+8)*n+4]=-grad[(num_cons*i+8)*n+4]/result[num_cons*i+8];
-		// }
 		
-		// //result[num_cons*i+8]=1.0/double(bez_beta)*log(result[num_cons*i+8])+bez_min_dist;
-		// //double min_dist=-result[num_cons*i+8];
-
-		// //Velocity limiting near obstacles
-		// double d_band_min=-1/vel_beta*log(result[num_cons*i+9]);
-
-		// result[num_cons*i+9]=pow(x_dot,2)+pow(y_dot,2)-pow(max_v,2)*(1-exp(-(d_band_min-bez_min_dist)/stop_dist_decay));
-
-		// if(grad){
-		// 	grad[(num_cons*i+9)*n]  =2*x_dot*pdx2 - (pow(max_v, 2)/stop_dist_decay) * exp(-(d_band_min-bez_min_dist)/stop_dist_decay) * grad[(num_cons*i+8)*n];
-		// 	grad[(num_cons*i+9)*n+1]=2*x_dot*pdx3 - (pow(max_v, 2)/stop_dist_decay) * exp(-(d_band_min-bez_min_dist)/stop_dist_decay) * grad[(num_cons*i+8)*n+1];
-		// 	grad[(num_cons*i+9)*n+2]=2*x_dot*pdy3 - (pow(max_v, 2)/stop_dist_decay) * exp(-(d_band_min-bez_min_dist)/stop_dist_decay) * grad[(num_cons*i+8)*n+2];
-		// 	grad[(num_cons*i+9)*n+3]=2*x_dot*pdx4 - (pow(max_v, 2)/stop_dist_decay) * exp(-(d_band_min-bez_min_dist)/stop_dist_decay) * grad[(num_cons*i+8)*n+3];
-		// 	grad[(num_cons*i+9)*n+4]=2*x_dot*pdy4 - (pow(max_v, 2)/stop_dist_decay) * exp(-(d_band_min-bez_min_dist)/stop_dist_decay) * grad[(num_cons*i+8)*n+4];
-		// }
-		
-		// //Velocity limiting wrt curvature
-		// double max_curv = tan(max_delta)/wheelbase;
-		// result[num_cons*i+10]=pow(x_dot,2)+pow(y_dot,2)-(pow(max_v,2)/(1+pow((curv/max_curv),2)));
-		// if(grad){
-		// 	grad[(num_cons*i+10)*n]  =2*x_dot*pdx2 - pow(max_v, 2) * (-1/pow(1+pow((curv/max_curv),2),2)) * (2*curv/pow(max_curv,2))*pcurvx2;
-		// 	grad[(num_cons*i+10)*n+1]=2*x_dot*pdx3 - pow(max_v, 2) * (-1/pow(1+pow((curv/max_curv),2),2)) * (2*curv/pow(max_curv,2))*pcurvx3;
-		// 	grad[(num_cons*i+10)*n+2]=2*x_dot*pdy3 - pow(max_v, 2) * (-1/pow(1+pow((curv/max_curv),2),2)) * (2*curv/pow(max_curv,2))*pcurvy3;
-		// 	grad[(num_cons*i+10)*n+3]=2*x_dot*pdx4 - pow(max_v, 2) * (-1/pow(1+pow((curv/max_curv),2),2)) * (2*curv/pow(max_curv,2))*pcurvx4;
-		// 	grad[(num_cons*i+10)*n+4]=2*x_dot*pdy4 - pow(max_v, 2) * (-1/pow(1+pow((curv/max_curv),2),2)) * (2*curv/pow(max_curv,2))*pcurvy4;
-		// }
-
 		
 	}
 
@@ -548,6 +469,8 @@ class GapBarrier
 		std::vector<double> wl0; std::vector<double> wr0;
 		int optim_mode;
 
+		double Testing;
+		float Testing2;
 
 		//markers
 		visualization_msgs::Marker marker;
@@ -1016,12 +939,12 @@ class GapBarrier
 					//Just for the one vehicle detection case
 					double robx=transform.transform.translation.x;
 					double roby=transform.transform.translation.y;
-					// 		transform.transform.translation.z);
-					double x=transform.transform.rotation.x;
-					double y=transform.transform.rotation.y;
-					double z=transform.transform.rotation.z;
-					double w=transform.transform.rotation.w;
-					double robtheta = atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z));
+					// double robz=transform.transform.translation.z);
+					// double x=transform.transform.rotation.x;
+					// double y=transform.transform.rotation.y;
+					// double z=transform.transform.rotation.z;
+					// double w=transform.transform.rotation.w;
+					//double robtheta = atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z));
 
 					double detx=(robx-simx)*cos(simtheta)+(roby-simy)*sin(simtheta);
 					double dety=-(robx-simx)*sin(simtheta)+(roby-simy)*cos(simtheta);
@@ -1074,10 +997,10 @@ class GapBarrier
 		void map_callback(const nav_msgs::OccupancyGrid & map_msg) {
 			
 			if(use_map && map_saved==0){ //Upon startup, save the map once and for full run
-				for (int i=0;i<map_msg.info.width*map_msg.info.height;i++){
+				for (unsigned i=0;i<map_msg.info.width*map_msg.info.height;i++){
 					if(map_msg.data[i]==100){
 						int add_pt=1;
-						for(int j=0;j<map_pts.size();j++){
+						for(unsigned j=0;j<map_pts.size();j++){
 							if(pow(map_pts[j][0]-map_msg.info.origin.position.x-i%map_msg.info.width*map_msg.info.resolution,2)+pow(map_pts[j][1]-map_msg.info.origin.position.y-i/map_msg.info.width*map_msg.info.resolution,2)<map_thresh){
 								add_pt=0; //If the points are too close, don't add in order to reduce computation load
 								break;
@@ -1094,9 +1017,8 @@ class GapBarrier
 		}
 
 		void amcl_callback(const geometry_msgs::PoseWithCovarianceStamped & amcl_msg){
-			// printf("cov:%lf, %lf, %lf\n",amcl_msg.pose.covariance[0],amcl_msg.pose.covariance[7],amcl_msg.pose.covariance[35]);
-			// printf("pose:%lf, %lf, %lf\n",amcl_msg.pose.pose.position.x,amcl_msg.pose.pose.position.y,2*atan2(amcl_msg.pose.pose.orientation.z, amcl_msg.pose.pose.orientation.w));
-			
+			printf("cov:%lf, %lf, %lf\n",amcl_msg.pose.covariance[0],amcl_msg.pose.covariance[7],amcl_msg.pose.covariance[35]);
+			printf("pose:%lf, %lf, %lf\n",amcl_msg.pose.pose.position.x,amcl_msg.pose.pose.position.y,2*atan2(amcl_msg.pose.pose.orientation.z, amcl_msg.pose.pose.orientation.w));
 		}
 
 		void yolo_callback(const f1tenth_simulator::YoloData & yolo_msg){ //Process all other vehicle detections for the KF
@@ -1107,7 +1029,7 @@ class GapBarrier
 
 			if(depth_imgs.size()<1) return;
 			int depth_ind=depth_imgs.size()-1; double mindiff=100;
-			for (int i=0;i<depth_imgs.size();i++){ //Find matching depth image to the rgb, based on closest reported timestamp
+			for (unsigned i=0;i<depth_imgs.size();i++){ //Find matching depth image to the rgb, based on closest reported timestamp
 				if(mindiff>std::abs(depth_imgs[i]->header.stamp.toSec()-yolo_msg.time)){
 					mindiff=std::abs(depth_imgs[i]->header.stamp.toSec()-yolo_msg.time);
 					depth_ind=i;
@@ -1137,14 +1059,14 @@ class GapBarrier
 			std::vector<std::vector<double>> yolo_xy; //x and y measurements of depth from yolo detection
 			
 
-			for (int i=0;i<yolo_msg.classes.size();i++){
+			for (unsigned i=0;i<yolo_msg.classes.size();i++){
 				int num=-1; float dist=100000;
 				const std::string& class_name = yolo_msg.classes[i];
 				if(class_name=="car"){
 					
 					yolo_xy.push_back(depth_calc(cv_image1, yolo_msg, i));
 
-					for (int j=0; j<car_detects.size();j++){ //Compare midpoints of bounding boxes, find minimum
+					for (unsigned j=0; j<car_detects.size();j++){ //Compare midpoints of bounding boxes, find minimum
 						double x_d=pow((car_detects[j].bound_box[1]+car_detects[j].bound_box[3])/2-(yolo_msg.rectangles[4*i+1]+yolo_msg.rectangles[4*i+3])/2,2);
 						double y_d=pow((car_detects[j].bound_box[0]+car_detects[j].bound_box[2])/2-(yolo_msg.rectangles[4*i]+yolo_msg.rectangles[4*i+2])/2,2);
 						if(sqrt(x_d+y_d)<dist && sqrt(x_d+y_d)<141 && temp_vec[j]==-1){ //Find closest match, ensure we aren't matching two yolos to the same detection and threshold dist must be below
@@ -1157,14 +1079,14 @@ class GapBarrier
 					}
 					else no_det.push_back(i);
 
-					double xorigin=cos(odomtheta)*(yolo_xy[0][0])-sin(odomtheta)*yolo_xy[0][1]+odomx;
-					double yorigin=sin(odomtheta)*(yolo_xy[0][0])+cos(odomtheta)*yolo_xy[0][1]+odomy;
+					// double xorigin=cos(odomtheta)*(yolo_xy[0][0])-sin(odomtheta)*yolo_xy[0][1]+odomx;
+					// double yorigin=sin(odomtheta)*(yolo_xy[0][0])+cos(odomtheta)*yolo_xy[0][1]+odomy;
 
 				}
 			}
 
 			//For all existing detections, provide the x and y of the depth measurement
-			for (int q=0; q<car_detects.size();q++){
+			for (unsigned q=0; q<car_detects.size();q++){
 				int i=temp_vec[q];
 				if(temp_vec[q]!=-1 &&yolo_xy[i][0]!=0 && yolo_xy[i][1]!=0){ //Detection found
 					car_detects[q].bound_box={yolo_msg.rectangles[4*i],yolo_msg.rectangles[4*i+1],yolo_msg.rectangles[4*i+2],yolo_msg.rectangles[4*i+3]}; //ymin, xmin, ymax, xmax
@@ -1175,7 +1097,7 @@ class GapBarrier
 			}
 
 			//For all new detections, create structs appended to the vector (deletions should take place in lidar callback)
-			for (int q=0; q<no_det.size();q++){
+			for (unsigned q=0; q<no_det.size();q++){
 				int i=no_det[q];
 				if(yolo_xy[i][0]!=0 && yolo_xy[i][1]!=0){
 					vehicle_detection new_det;
@@ -1372,15 +1294,10 @@ class GapBarrier
 			cv::Mat cv_image=(cv_bridge::toCvCopy(data,data->encoding))->image; 
 			auto grades= cv::bitwise_and(cv_image >> 4, cv::Scalar(0x0f));
 			*/
-
-
-
 		}
 
 		void imageColor_callback( const sensor_msgs::ImageConstPtr & img)
-		{
-			
-		}
+		{}
 
 
 		void imageColorInfo_callback(const sensor_msgs::CameraInfoConstPtr & cameraInfo)
@@ -1595,7 +1512,7 @@ class GapBarrier
 
 			//1. Determine a point on the plane
 
-			float3 plane_point={ 0 , 0 , 1.0/groundplane.C*-groundplane.D };
+			float3 plane_point={ 0 , 0 , 1/groundplane.C*-groundplane.D };
 
 			//2. Compute a vector pointing from on the plane to the point in space
 
@@ -1732,17 +1649,17 @@ class GapBarrier
 				ranges=ranges1;
 				if(safe_dist<0.1){
 					num_det=1;
-					for(int i =0; i < ranges.size(); ++i){
+					for(unsigned i =0; i < ranges.size(); ++i){
 						if(lidar_angles[i] <= right_beam_angle_MPC) right_ind_MPC +=1;
 						if(lidar_angles[i] <= left_beam_angle_MPC) left_ind_MPC +=1;
 					}
 					left_ind_MPC +=1;
 				}
 				else{
-					for(int i =0; i < ranges.size(); ++i){
+					for(unsigned i =0; i < ranges.size(); ++i){
 						if(lidar_angles[i] <= right_beam_angle_MPC) right_ind_MPC +=1;
 						if(lidar_angles[i] <= left_beam_angle_MPC) left_ind_MPC +=1;
-						if(right_ind_MPC!=i+1 && left_ind_MPC==i+1){
+						if(right_ind_MPC!=(int)i+1 && left_ind_MPC==(int)i+1){
 							if(ranges[i] <= safe_dist) {ranges[i] = 0;}
 							else if(ranges[i] > max_lidar_range) {ranges[i] = max_lidar_range; num_det++;}
 							else{num_det++;}
@@ -1819,7 +1736,7 @@ class GapBarrier
 
 		double find_best_point_MPC(int start_i, int end_i, std::vector<float> proc_ranges, std::vector<double> lidar_transform_angles){
 			double best_heading = 0; //Angles aren't evenly spaced so simple midpoint suffices here, avoids complications	
-			double max_range = 0; 
+			//double max_range = 0; 
 	
 			// for(int i=start_i; i<=end_i; ++i){ //This doesnt work since many points have max_distance since no range returned
 			// 	if(proc_ranges[i] > max_range){
@@ -1856,7 +1773,7 @@ class GapBarrier
 			geometry_msgs::Point p7;
 			vehicle_detect_path.points.clear();
 
-			for(int i=0; i<car_detects.size();i++){ //For each detection, plot trajectory over next 3 seconds	
+			for(unsigned i=0; i<car_detects.size();i++){ //For each detection, plot trajectory over next 3 seconds	
 				if(car_detects[i].init<2) continue;
 				double x_det=car_detects[i].state[0]; double y_det=car_detects[i].state[1]; double theta_det=car_detects[i].state[2];
 				
@@ -1906,7 +1823,7 @@ class GapBarrier
 				
 			}
 
-			for(int q=0; q<car_detects.size();q++){ //Run the KF for every current detections here
+			for(unsigned q=0; q<car_detects.size();q++){ //Run the KF for every current detections here
 				
 				if(car_detects[q].init==0){ //Initialize
 					if(car_detects[q].last_det==1){ //Only if measurement received
@@ -2087,7 +2004,7 @@ class GapBarrier
 		
 			
 
-			int sec_len = int(heading_beam_angle/data->angle_increment);
+			//int sec_len = int(heading_beam_angle/data->angle_increment);
 
 			double min_distance, velocity_scale, delta_d;
 			
@@ -2102,9 +2019,9 @@ class GapBarrier
 				std::vector<double> lidar_transform_angles_tot0s;
 
 
-				double track_line[2][nMPC*kMPC]; //Tracking line a & b (assume c=1) parameters for all time intervals, additional terms for passing n & k
-				double theta_refs[nMPC]; //Reference angles for each time interval
-				double startx, starty; //Initial points for that tracking line interval (line is likely not connected to prev. so jump)
+				// double track_line[2][nMPC*kMPC]; //Tracking line a & b (assume c=1) parameters for all time intervals, additional terms for passing n & k
+				//double theta_refs[nMPC]; //Reference angles for each time interval
+				// double startx, starty; //Initial points for that tracking line interval (line is likely not connected to prev. so jump)
 				double xpt=0, ypt=0; //Reference point for future LIDAR calculations with same original LIDAR scan
 				double theta_ref=0; //New reference theta for the LIDAR angles to be appropriately rotated so this angle is reference 0 
 
@@ -2113,11 +2030,11 @@ class GapBarrier
 				double heading_angle;
 
 				std::vector<double> lidar_transform_angles;
-				for(int i=0;i<data->ranges.size();i++){
+				for(unsigned i=0;i<data->ranges.size();i++){
 					lidar_transform_angles.push_back(i*data->angle_increment-M_PI);
 				}
 
-				double startxplot[nMPC],startyplot[nMPC],xptplot[nMPC],yptplot[nMPC];
+				double xptplot[nMPC],yptplot[nMPC]; // , startxplot[nMPC],startyplot[nMPC];
 				std::vector<double> wl = {0.0, 0.0};
 				std::vector<double> wr = {0.0, 0.0};
 				std::vector<double> wc = {0.0, 0.0};
@@ -2133,7 +2050,7 @@ class GapBarrier
 					
 						double map_xval=mapped_x+cos(mapped_theta)*xpt-sin(mapped_theta)*ypt;
 						double map_yval=mapped_y+sin(mapped_theta)*xpt+cos(mapped_theta)*ypt;
-						for(int i=0;i<map_pts.size();i++){
+						for(unsigned i=0;i<map_pts.size();i++){
 							if(pow(map_pts[i][0]-map_xval,2)+pow(map_pts[i][1]-map_yval,2)<pow(max_lidar_range_opt,2)){
 								double x_base=(map_pts[i][0]-locx)*cos(loctheta)+(map_pts[i][1]-locy)*sin(loctheta);
 								double y_base=-(map_pts[i][0]-locx)*sin(loctheta)+(map_pts[i][1]-locy)*cos(loctheta);
@@ -2150,7 +2067,7 @@ class GapBarrier
 						lidar_transform_angles_tot.insert(lidar_transform_angles_tot.end(), lidar_transform_angles_map.begin(), lidar_transform_angles_map.end());
 						
 						std::vector<std::pair<double, double>> vec;
-						for (int i = 0; i < fused_ranges_MPC_tot.size(); ++i) {
+						for (unsigned i = 0; i < fused_ranges_MPC_tot.size(); ++i) {
 							vec.push_back(std::make_pair(lidar_transform_angles_tot[i], fused_ranges_MPC_tot[i]));
 						}
 
@@ -2160,7 +2077,7 @@ class GapBarrier
 						});
 
 						// Step 3: Unpack the sorted pairs back into the original arrays
-						for (int i = 0; i < fused_ranges_MPC_tot.size(); ++i) {
+						for (unsigned i = 0; i < fused_ranges_MPC_tot.size(); ++i) {
 							lidar_transform_angles_tot[i] = vec[i].first;
 							fused_ranges_MPC_tot[i] = vec[i].second;
 							
@@ -2173,7 +2090,7 @@ class GapBarrier
 						std::vector<double> lidar_transform_angles_veh_det; //These are the additional ranges & angles from vehicle detections that will be sorted, included in obs calculations
 						int mult_factor=1; //This way, we get 2x amount of points for detections, improves the augmentation of LIDAR data
 
-						for (int i=0; i<car_detects.size(); i++){
+						for (unsigned i=0; i<car_detects.size(); i++){
 							if(car_detects[i].init==2){
 								int start_track=0; int end_track=(int)(std::ceil(bez_t_end/std::max(default_dt,dt))-1.0)*mult_factor; //Use all of the trajectory in Bezier case
 								double track_x=car_detects[i].state[0]; double track_y=car_detects[i].state[1]; double track_theta=car_detects[i].state[2];
@@ -2186,7 +2103,7 @@ class GapBarrier
 
 										double tfed_x=cos(theta_ref)*(track_x-xpt)+sin(theta_ref)*(track_y-ypt);
 										double tfed_y=-sin(theta_ref)*(track_x-xpt)+cos(theta_ref)*(track_y-ypt); //tf from vehicle frame to future MPC frame
-										double tfed_ang=0;
+										//double tfed_ang=0;
 										
 
 										//More complete detection if we construct a box around the current midpoint (note don't need to push back mid point then)
@@ -2231,7 +2148,7 @@ class GapBarrier
 						lidar_transform_angles_tot.insert(lidar_transform_angles_tot.end(), lidar_transform_angles_veh_det.begin(), lidar_transform_angles_veh_det.end());
 						
 						std::vector<std::pair<double, double>> vec;
-						for (int i = 0; i < fused_ranges_MPC_tot.size(); ++i) {
+						for (unsigned i = 0; i < fused_ranges_MPC_tot.size(); ++i) {
 							vec.push_back(std::make_pair(lidar_transform_angles_tot[i], fused_ranges_MPC_tot[i]));
 						}
 
@@ -2241,7 +2158,7 @@ class GapBarrier
 						});
 
 						// Step 3: Unpack the sorted pairs back into the original arrays
-						for (int i = 0; i < fused_ranges_MPC_tot.size(); ++i) {
+						for (unsigned i = 0; i < fused_ranges_MPC_tot.size(); ++i) {
 							lidar_transform_angles_tot[i] = vec[i].first;
 							fused_ranges_MPC_tot[i] = vec[i].second;
 							
@@ -2251,7 +2168,7 @@ class GapBarrier
 
 					if(num_MPC==0){
 						double smallestdist=1000;
-						for(int i=0;i<fused_ranges_MPC.size();i++){
+						for(unsigned i=0;i<fused_ranges_MPC.size();i++){
 							if(fused_ranges_MPC[i]<smallestdist){
 								smallestdist=fused_ranges_MPC[i];
 							}
@@ -2308,7 +2225,7 @@ class GapBarrier
 
 							int start_indx_l_MPC=0, start_indx_r_MPC=0, end_indx_l_MPC=0, end_indx_r_MPC=0;
 
-							for (int w=0;w<fused_ranges_MPC_tot.size();w++){
+							for (unsigned w=0;w<fused_ranges_MPC_tot.size();w++){
 							
 								if(lidar_transform_angles_tot[w] <= mod_angle_br_MPC) start_indx_r_MPC +=1;
 								if(lidar_transform_angles_tot[w] <= mod_angle_ar_MPC) end_indx_r_MPC +=1;
@@ -2415,7 +2332,7 @@ class GapBarrier
 					if(theta_ref-heading_angle<-M_PI/2) theta_ref+=M_PI;
 					while (theta_ref>M_PI) theta_ref-=2*M_PI;
 					while (theta_ref<-M_PI) theta_ref+=2*M_PI;
-					theta_refs[num_MPC]=theta_ref;
+					//theta_refs[num_MPC]=theta_ref;
 					//For first, drive 3/4 of the way, second drive the last 1/4 since first three points are fixed
 					if(num_MPC==0){
 						xpt=xpt+std::max(vel_adapt,min_speed)*bez_t_end*3.0/(bez_ctrl_pts-1)*cos(theta_ref); //Drive message relates to lidar callback scan topic, ~10Hz
@@ -2435,7 +2352,7 @@ class GapBarrier
 						
 						std::vector<float> lidar_transform = data->ranges;
 						double transform_coords[2][lidar_transform.size()];
-						for (int i=0;i<lidar_transform.size();i++)
+						for (unsigned i=0;i<lidar_transform.size();i++)
 						{
 							transform_coords[0][i]=lidar_transform[i]*cos(-M_PI+i*2*M_PI/scan_beams);
 							transform_coords[1][i]=lidar_transform[i]*sin(-M_PI+i*2*M_PI/scan_beams);
@@ -2446,7 +2363,7 @@ class GapBarrier
 							
 						}
 						std::vector<std::pair<double, double>> vec;
-						for (int i = 0; i < lidar_transform.size(); ++i) {
+						for (unsigned i = 0; i < lidar_transform.size(); ++i) {
 							vec.push_back(std::make_pair(lidar_transform_angles[i], lidar_transform[i]));
 						}
 
@@ -2456,7 +2373,7 @@ class GapBarrier
 						});
 
 						// Step 3: Unpack the sorted pairs back into the original arrays
-						for (int i = 0; i < lidar_transform.size(); ++i) {
+						for (unsigned i = 0; i < lidar_transform.size(); ++i) {
 							lidar_transform_angles[i] = vec[i].first;
 							lidar_transform[i] = vec[i].second;
 							
@@ -2523,7 +2440,7 @@ class GapBarrier
 				//Select a subsample of all obstacles
 				std::vector<std::vector<double>> bez_obs;
 				std::vector<std::vector<double>> sub_bez_obs;
-				for(int i=0;i<fused_ranges_MPC_tot0.size();i++){
+				for(unsigned i=0;i<fused_ranges_MPC_tot0.size();i++){
 					bez_obs.push_back({fused_ranges_MPC_tot0[i]*cos(lidar_transform_angles_tot0[i]),fused_ranges_MPC_tot0[i]*sin(lidar_transform_angles_tot0[i])});
 				}
 
@@ -2663,14 +2580,14 @@ class GapBarrier
 					double t= std::max(default_dt,dt)/bez_t_end;
 					double x_dot=4*bez_x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
 					double x_ddot=4*bez_x1*(-12*pow(t,2)+18*t-6)+6*x[0]*(12*pow(t,2)-12*t+2)+4*x[1]*(-12*pow(t,2)+6*t)+12*x[3]*pow(t,2);
-					double x_dddot=4*bez_x1*(-24*t+18)+6*x[0]*(24*t-12)+4*x[1]*(-24*t+6)+24*x[3]*t;
+					//double x_dddot=4*bez_x1*(-24*t+18)+6*x[0]*(24*t-12)+4*x[1]*(-24*t+6)+24*x[3]*t;
 
 					double y_dot=6*bez_y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
 					double y_ddot=6*bez_y2*(12*pow(t,2)-12*t+2)+4*x[2]*(-12*pow(t,2)+6*t)+12*x[4]*pow(t,2);
-					double y_dddot=6*bez_y2*(24*t-12)+4*x[2]*(-24*t+6)+24*x[4]*t;
+					//double y_dddot=6*bez_y2*(24*t-12)+4*x[2]*(-24*t+6)+24*x[4]*t;
 
 					double curv=(x_dot*y_ddot-y_dot*x_ddot)/(pow(pow(x_dot,2)+pow(y_dot,2),1.5));
-					double curv_dot=((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))/pow((pow(x_dot,2)+pow(y_dot,2)),2.5);
+					//double curv_dot=((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))/pow((pow(x_dot,2)+pow(y_dot,2)),2.5);
 
 					last_delta=atan2(curv*wheelbase,1);
 					last_delta=std::max(-max_steering_angle,last_delta);
@@ -2717,7 +2634,7 @@ class GapBarrier
 				
 				marker.lifetime = ros::Duration(0.1);
 
-				int line_len = 1;
+				// int line_len = 1;
 				geometry_msgs::Point p;
 				marker.points.clear();
 				
@@ -2777,7 +2694,7 @@ class GapBarrier
 				geometry_msgs::Point p3;
 				lobs_marker.points.clear();
 				int count=0;
-				for(int i=0;i<obstacle_points_l.size();i++){
+				for(unsigned i=0;i<obstacle_points_l.size();i++){
 					double po1=obstacle_points_l[i][0];
 					double po2=obstacle_points_l[i][1];
 					p3.x = po1;	p3.y = po2;	p3.z = 0;
@@ -2810,7 +2727,7 @@ class GapBarrier
 				robs_marker.points.clear();
 				
 				count=0;
-				for(int i=0;i<obstacle_points_r.size();i++){
+				for(unsigned i=0;i<obstacle_points_r.size();i++){
 					double po1=obstacle_points_r[i][0];
 					double po2=obstacle_points_r[i][1];
 					p4.x = po1;	p4.y = po2;	p4.z = 0;
@@ -2894,19 +2811,19 @@ class GapBarrier
 				
 
 				
-				min_distance = max_lidar_range + 100; int idx1, idx2;
-				idx1 = -sec_len+int(scan_beams/2); idx2 = sec_len + int(scan_beams/2);
+				min_distance = max_lidar_range + 100; //int idx1, idx2;
+				// idx1 = -sec_len+int(scan_beams/2); idx2 = sec_len + int(scan_beams/2);
 
 				// for(int i = idx1; i <= idx2; ++i){
 				// 	if(fused_ranges[i] < min_distance) min_distance = fused_ranges[i];
 				// }
-				for(int i=0;i<fused_ranges_MPC_tot0.size();i++){ //Consider all obstacles, not just sensor data
+				for(unsigned i=0;i<fused_ranges_MPC_tot0.size();i++){ //Consider all obstacles, not just sensor data
 					if(std::abs(lidar_transform_angles_tot0[i])<heading_beam_angle && fused_ranges_MPC_tot0[i]<min_distance){
 						min_distance=fused_ranges_MPC_tot0[i];
 					}
 
 				}
-				for(int i=0;i<fused_ranges_MPC_veh_det0.size();i++){ //Consider the full detected vehicle trajectory
+				for(unsigned i=0;i<fused_ranges_MPC_veh_det0.size();i++){ //Consider the full detected vehicle trajectory
 					if(std::abs(lidar_transform_angles_veh_det0[i])<heading_beam_angle && fused_ranges_MPC_veh_det0[i]<min_distance){
 						min_distance=fused_ranges_MPC_veh_det0[i];
 					}
