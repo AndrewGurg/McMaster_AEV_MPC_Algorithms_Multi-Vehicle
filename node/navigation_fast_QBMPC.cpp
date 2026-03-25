@@ -126,6 +126,7 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 	double y2=xopt[1][2];
 	double potfield_factor=xopt[0][3];
 	double vel_factor=xopt[1][3];
+	int num_param_pairs = 4;
 	std::vector<std::vector<double>> bez_curv;
 	//Optimization variables:
 	//[0] -> x2
@@ -156,17 +157,17 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 		double py3=px3;
 		double px4=pow(t,4);
 		double py4=px4;
-		for(int j=0;j<cols-3;j++){
-			double dist2= pow(bez_curv[i][0]-xopt[0][j+4],2)+pow(bez_curv[i][1]-xopt[1][j+4],2); //Squared distance
+		for(int j=0;j<cols-num_param_pairs;j++){
+			double dist2= pow(bez_curv[i][0]-xopt[0][j+num_param_pairs],2)+pow(bez_curv[i][1]-xopt[1][j+num_param_pairs],2); //Squared distance
 			
 			funcreturn=funcreturn+(potfield_factor/dist2)*exp(-bez_alpha*dist2); //Sum of reciprocal squared distances, exponentially decaying weight
 			//Next, find grad for each of five variables
 			if(grad){
-	/* x2 */ 	grad[0]=grad[0]-potfield_factor*2*(bez_curv[i][0]-xopt[0][j+4])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px2;
-	/* x3 */ 	grad[1]=grad[1]-potfield_factor*2*(bez_curv[i][0]-xopt[0][j+4])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px3;
-	/* y3 */ 	grad[2]=grad[2]-potfield_factor*2*(bez_curv[i][1]-xopt[1][j+4])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py3;
-	/* x4 */ 	grad[3]=grad[3]-potfield_factor*2*(bez_curv[i][0]-xopt[0][j+4])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px4;
-	/* y4 */ 	grad[4]=grad[4]-potfield_factor*2*(bez_curv[i][1]-xopt[1][j+4])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py4;
+	/* x2 */ 	grad[0]=grad[0]-potfield_factor*2*(bez_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px2;
+	/* x3 */ 	grad[1]=grad[1]-potfield_factor*2*(bez_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px3;
+	/* x4 */ 	grad[3]=grad[3]-potfield_factor*2*(bez_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px4;
+	/* y4 */ 	grad[4]=grad[4]-potfield_factor*2*(bez_curv[i][1]-xopt[1][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py4;
+	/* y3 */ 	grad[2]=grad[2]-potfield_factor*2*(bez_curv[i][1]-xopt[1][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py3;
 			}
 		}
 		
@@ -219,6 +220,7 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 	double theta_band_diff=xopt[1][7];
 	double vel_beta=xopt[0][8];
 	double stop_dist_decay=xopt[1][8];
+	int num_param_pairs = 9;
 	std::vector<std::vector<double>> bez_curv;
 	//Optimization variables:
 	//[0] -> x2
@@ -236,7 +238,7 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 	}
 
 	if(result){
-		for(int i=0;i<=(bez_curv_pts-1)*num_cons+8;i++){
+		for(int i=0;i<=(bez_curv_pts-1)*num_cons+(num_cons-1);i++){
 			result[i]=0;
 		}
 	}
@@ -359,17 +361,17 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 
 
 		//Smooth minimum obstacle distance
-		for(int j=0;j<cols-7;j++){
-			double dist1= pow(pow(bez_curv[i][0]-xopt[0][j+7],2)+pow(bez_curv[i][1]-xopt[1][j+7],2),0.5); //Euclidean distance
+		for(int j=0;j<cols-num_param_pairs;j++){
+			double dist1= pow(pow(bez_curv[i][0]-xopt[0][j+num_param_pairs],2)+pow(bez_curv[i][1]-xopt[1][j+num_param_pairs],2),0.5); //Euclidean distance
 			result[9*i+8]=result[9*i+8]+exp(-1.0*double(bez_beta)*dist1);
 			
 
 			if(grad){
-		/*x2*/	grad[(num_cons*i+8)*n]=grad[(num_cons*i+8)*n]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+7])/dist1*px2;
-		/*x3*/	grad[(num_cons*i+8)*n+1]=grad[(num_cons*i+8)*n+1]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+7])/dist1*px3;
-		/*y3*/	grad[(num_cons*i+8)*n+2]=grad[(num_cons*i+8)*n+2]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+7])/dist1*py3;
-		/*x4*/	grad[(num_cons*i+8)*n+3]=grad[(num_cons*i+8)*n+3]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+7])/dist1*px4;
-		/*y4*/	grad[(num_cons*i+8)*n+4]=grad[(num_cons*i+8)*n+4]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+7])/dist1*py4;
+		/*x2*/	grad[(num_cons*i+8)*n]=grad[(num_cons*i+8)*n]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px2;
+		/*x3*/	grad[(num_cons*i+8)*n+1]=grad[(num_cons*i+8)*n+1]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px3;
+		/*y3*/	grad[(num_cons*i+8)*n+2]=grad[(num_cons*i+8)*n+2]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+num_param_pairs])/dist1*py3;
+		/*x4*/	grad[(num_cons*i+8)*n+3]=grad[(num_cons*i+8)*n+3]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px4;
+		/*y4*/	grad[(num_cons*i+8)*n+4]=grad[(num_cons*i+8)*n+4]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+num_param_pairs])/dist1*py4;
 			}
 		}
 		if(grad){
@@ -2738,6 +2740,53 @@ class GapBarrier
 					}
 				}
 
+
+				// All lidar scan modifications done here
+				// Outputs: fused_ranges_MPC_tot0, lidar_transform_angles_tot0
+				printf("fused_ranges size: %d\n",fused_ranges_MPC_tot0.size());
+				printf("transform_angles size: %d\n",lidar_transform_angles_tot0.size());
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 				//Select a subsample of all obstacles
 				std::vector<std::vector<double>> bez_obs;
 				std::vector<std::vector<double>> sub_bez_obs;
@@ -2797,11 +2846,13 @@ class GapBarrier
 
 				std::vector<double> opt_params1;
 				std::vector<double> opt_params2;
-				
-				opt_params1.push_back(num_obs+3); opt_params1.push_back(bez_ctrl_pts); opt_params1.push_back(bez_curv_pts); opt_params1.push_back(bez_alpha); opt_params1.push_back(bez_x1); opt_params1.push_back(bez_y2);
+				int num_param_pairs_1 = 4;
+				int num_param_pairs_2 = 9;
+
+				opt_params1.push_back(num_obs+num_param_pairs_1); opt_params1.push_back(bez_ctrl_pts); opt_params1.push_back(bez_curv_pts); opt_params1.push_back(bez_alpha); opt_params1.push_back(bez_x1); opt_params1.push_back(bez_y2);
 				opt_params1.push_back(pot_field_factor_F_QBMPC); opt_params1.push_back(velocity_factor_F_QBMPC);
 
-				opt_params2.push_back(num_obs+7); opt_params2.push_back(bez_ctrl_pts); opt_params2.push_back(bez_curv_pts); opt_params2.push_back(bez_beta); opt_params2.push_back(bez_x1); opt_params2.push_back(bez_y2);
+				opt_params2.push_back(num_obs+num_param_pairs_2); opt_params2.push_back(bez_ctrl_pts); opt_params2.push_back(bez_curv_pts); opt_params2.push_back(bez_beta); opt_params2.push_back(bez_x1); opt_params2.push_back(bez_y2);
 				opt_params2.push_back(max_speed); opt_params2.push_back(min_speed); opt_params2.push_back(max_accel); opt_params2.push_back(max_steering_angle); opt_params2.push_back(max_servo_speed);
 				opt_params2.push_back(bez_t_end); opt_params2.push_back(wheelbase); opt_params2.push_back(bez_min_dist); opt_params2.push_back(theta_band_smooth); opt_params2.push_back(theta_band_diff);
 				opt_params2.push_back(vel_beta); opt_params2.push_back(stop_dist_decay);
