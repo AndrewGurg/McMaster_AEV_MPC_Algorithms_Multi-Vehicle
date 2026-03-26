@@ -435,6 +435,7 @@ class GapBarrier
 		ros::Publisher lobs;
 		ros::Publisher robs;
 		ros::Publisher scan_gap;
+		ros::Publisher jump;
 		ros::Publisher bez_mark;
 		ros::Publisher vehicle_detect;
 		ros::Publisher driver_pub;
@@ -485,6 +486,7 @@ class GapBarrier
 		visualization_msgs::Marker bez;
 		visualization_msgs::Marker vehicle_detect_path;
 		visualization_msgs::Marker scan_gap_marker;
+		visualization_msgs::Marker jump_marker;
 
 		//steering & stop time
 		double vel;
@@ -828,6 +830,7 @@ class GapBarrier
 			lobs=nf.advertise<visualization_msgs::Marker>("lobs",2);
 			robs=nf.advertise<visualization_msgs::Marker>("robs",2);
 			scan_gap=nf.advertise<visualization_msgs::Marker>("scan_gap",2);
+			jump=nf.advertise<visualization_msgs::Marker>("jump",2);
 			bez_mark=nf.advertise<visualization_msgs::Marker>("bez",2);
 			vehicle_detect=nf.advertise<visualization_msgs::Marker>("vehicle_detect",2);
 			driver_pub = nf.advertise<ackermann_msgs::AckermannDriveStamped>(drive_topic, 1);
@@ -1756,6 +1759,29 @@ class GapBarrier
 		}
 
 
+		int find_max_jump(std::vector<float> ranges, std::vector<double> angles){
+			// Finds the largest jump in scan data, then returns the point in the center of that jump.
+			double max_jump = 0;	// Size of jump
+			int max_idx;		// Index of start of jump
+			double jump;
+
+			// Only look ahead of the vehicle
+			for(int i =right_ind_MPC; i < left_ind_MPC; ++i){
+				// Get jump between this index and next
+				jump = std::abs(ranges[i]-ranges[i+1]);
+				// Compare with max
+				if (jump > max_jump){
+					max_jump = jump;
+					max_idx = i;
+				} 
+			}
+			// Return center point in the middle of the jump
+			// double r = (ranges[max_idx] + ranges[max_idx + 1])/2;
+			// double theta = (angles[max_idx] + angles[max_idx + 1])/2;
+			return max_idx;
+			//return std::make_pair(r*cos(theta), r*sin(theta));
+		}
+
 
 		void visualize_detections(){
 			//This should occur whether or not we are in autonomous mode
@@ -2396,6 +2422,14 @@ class GapBarrier
 				
 				// Navigate to center of that gap
 
+				int max_jump_idx = find_max_jump(fused_ranges_MPC_tot0,lidar_transform_angles_tot0);
+				// double r = (ranges[max_idx] + ranges[max_idx + 1])/2;
+				// double theta = (angles[max_idx] + angles[max_idx + 1])/2;
+
+				std::vector<double> max_jump_start = {fused_ranges_MPC_tot0[max_jump_idx]*cos(lidar_transform_angles_tot0[max_jump_idx]), fused_ranges_MPC_tot0[max_jump_idx]*sin(lidar_transform_angles_tot0[max_jump_idx])};
+				std::vector<double> max_jump_end   = {fused_ranges_MPC_tot0[max_jump_idx+1]*cos(lidar_transform_angles_tot0[max_jump_idx+1]), fused_ranges_MPC_tot0[max_jump_idx+1]*sin(lidar_transform_angles_tot0[max_jump_idx+1])};
+				std::vector<double> max_jump_point = {(max_jump_start[0] + max_jump_end[0])/2, (max_jump_start[1] + max_jump_end[1])/2};
+
 
 				// xptplot[1] = (obstacle_points_l[0][0] + obstacle_points_r[obstacle_points_r.size()-1][0]) / 2;
 				// yptplot[1] = (obstacle_points_l[0][1] + obstacle_points_r[obstacle_points_r.size()-1][1]) / 2;
@@ -2507,7 +2541,8 @@ class GapBarrier
 				double bez_y2=4.0/3.0*pow(bez_x1,2)*tan(last_delta)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
 				double bez_x4=(obstacle_points_l[0][0] + obstacle_points_r[obstacle_points_r.size()-1][0]) / 2;
 				double bez_y4=(obstacle_points_l[0][1] + obstacle_points_r[obstacle_points_r.size()-1][1]) / 2;
-
+				// double bez_x4=max_jump_point[0];
+				// double bez_y4=max_jump_point[1];
 
 				std::vector<double> opt_params1;
 				std::vector<double> opt_params2;
@@ -2788,6 +2823,33 @@ class GapBarrier
 				scan_gap_marker.points.push_back(p6); 	// Last point in right obstacles
 
 				scan_gap.publish(scan_gap_marker);
+
+
+				//Publish the largest jump
+				jump_marker.header.frame_id = base_frame;
+				jump_marker.header.stamp = ros::Time::now();
+				jump_marker.type = visualization_msgs::Marker::LINE_LIST;
+				jump_marker.id = 0; 
+				jump_marker.action = visualization_msgs::Marker::ADD;
+				jump_marker.scale.x = 0.1;
+				jump_marker.color.a = 1.0;
+				jump_marker.color.r = 1; 
+				jump_marker.color.g = 0;
+				jump_marker.color.b = 1;
+				jump_marker.pose.orientation.w = 1;
+				
+				jump_marker.lifetime = ros::Duration(0.1);
+
+				geometry_msgs::Point p7;
+				jump_marker.points.clear();
+				
+				p7.x = max_jump_start[0];	p7.y = max_jump_start[1];	p7.z = 0;
+				jump_marker.points.push_back(p7); 	// First point in left obstacles
+
+				p7.x = max_jump_end[0];	p7.y = max_jump_end[1];	p7.z = 0;
+				jump_marker.points.push_back(p7); 	// Last point in right obstacles
+
+				jump.publish(jump_marker);
 
 
 

@@ -511,6 +511,7 @@ class GapBarrier
 		ros::Publisher wall_marker_pub;
 		ros::Publisher lobs;
 		ros::Publisher robs;
+		ros::Publisher scan_gap;
 		ros::Publisher bez_mark;
 		ros::Publisher vehicle_detect;
 		ros::Publisher driver_pub;
@@ -556,6 +557,7 @@ class GapBarrier
 		visualization_msgs::Marker wall_marker;
 		visualization_msgs::Marker lobs_marker;
 		visualization_msgs::Marker robs_marker;
+		visualization_msgs::Marker scan_gap_marker;
 		visualization_msgs::Marker bez;
 		visualization_msgs::Marker vehicle_detect_path;
 
@@ -900,6 +902,7 @@ class GapBarrier
 			wall_marker_pub=nf.advertise<visualization_msgs::Marker>("walls",2);
 			lobs=nf.advertise<visualization_msgs::Marker>("lobs",2);
 			robs=nf.advertise<visualization_msgs::Marker>("robs",2);
+			scan_gap=nf.advertise<visualization_msgs::Marker>("scan_gap",2);
 			bez_mark=nf.advertise<visualization_msgs::Marker>("bez",2);
 			vehicle_detect=nf.advertise<visualization_msgs::Marker>("vehicle_detect",2);
 			driver_pub = nf.advertise<ackermann_msgs::AckermannDriveStamped>(drive_topic, 1);
@@ -3092,6 +3095,33 @@ class GapBarrier
 				}
 
 				robs.publish(robs_marker);
+
+
+				//Publish the scan gap (line from right obstacles to left obstacles)
+				scan_gap_marker.header.frame_id = base_frame;
+				scan_gap_marker.header.stamp = ros::Time::now();
+				scan_gap_marker.type = visualization_msgs::Marker::LINE_LIST;
+				scan_gap_marker.id = 0; 
+				scan_gap_marker.action = visualization_msgs::Marker::ADD;
+				scan_gap_marker.scale.x = 0.1;
+				scan_gap_marker.color.a = 1.0;
+				scan_gap_marker.color.r = 0; 
+				scan_gap_marker.color.g = 1;
+				scan_gap_marker.color.b = 0;
+				scan_gap_marker.pose.orientation.w = 1;
+				
+				scan_gap_marker.lifetime = ros::Duration(0.1);
+
+				geometry_msgs::Point p6;
+				scan_gap_marker.points.clear();
+				
+				p6.x = obstacle_points_l[0][0];	p6.y = obstacle_points_l[0][1];	p6.z = 0;
+				scan_gap_marker.points.push_back(p6); 	// First point in left obstacles
+
+				p6.x = obstacle_points_r[obstacle_points_r.size()-1][0];	p6.y = obstacle_points_r[obstacle_points_r.size()-1][1];	p6.z = 0;
+				scan_gap_marker.points.push_back(p6); 	// Last point in right obstacles
+
+				scan_gap.publish(scan_gap_marker);
 
 
 
