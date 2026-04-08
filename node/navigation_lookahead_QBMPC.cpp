@@ -231,7 +231,7 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 	
 	//Create the discretized Bezier Curve
 	for(int i=0; i<bez_curv_pts; i++){
-		double t=double(i)/double(bez_curv_pts);
+		double t=double(i)/double(bez_curv_pts-1);
 		double bez_x=4*pow(1-t,3)*t*x1+6*pow(1-t,2)*pow(t,2)*x[0]+4*(1-t)*pow(t,3)*x[1]+pow(t,4)*x4;
 		double bez_y=6*pow(1-t,2)*pow(t,2)*y2+4*(1-t)*pow(t,3)*x[2]+pow(t,4)*y4; //y1=0
 		bez_curv.push_back({bez_x,bez_y});
@@ -250,7 +250,7 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 	}
 
 	for(int i=0;i<bez_curv_pts; i++){
-		double t=double(i)/double(bez_curv_pts);
+		double t=double(i)/double(bez_curv_pts-1);
 		double x_dot=4*x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x4*pow(t,3);
 		double x_ddot=4*x1*(-12*pow(t,2)+18*t-6)+6*x[0]*(12*pow(t,2)-12*t+2)+4*x[1]*(-12*pow(t,2)+6*t)+12*x4*pow(t,2);
 		double x_dddot=4*x1*(-24*t+18)+6*x[0]*(24*t-12)+4*x[1]*(-24*t+6)+24*x4*t;
@@ -436,6 +436,8 @@ class GapBarrier
 		ros::Publisher robs;
 		ros::Publisher scan_gap;
 		ros::Publisher jump;
+		ros::Publisher safe_scan;
+		ros::Publisher max_scan;
 		ros::Publisher bez_mark;
 		ros::Publisher vehicle_detect;
 		ros::Publisher driver_pub;
@@ -487,6 +489,8 @@ class GapBarrier
 		visualization_msgs::Marker vehicle_detect_path;
 		visualization_msgs::Marker scan_gap_marker;
 		visualization_msgs::Marker jump_marker;
+		visualization_msgs::Marker safe_marker;
+		visualization_msgs::Marker max_range_marker;
 
 		//steering & stop time
 		double vel;
@@ -831,6 +835,8 @@ class GapBarrier
 			robs=nf.advertise<visualization_msgs::Marker>("robs",2);
 			scan_gap=nf.advertise<visualization_msgs::Marker>("scan_gap",2);
 			jump=nf.advertise<visualization_msgs::Marker>("jump",2);
+			safe_scan=nf.advertise<visualization_msgs::Marker>("safe_scan",2);
+			max_scan=nf.advertise<visualization_msgs::Marker>("max_scan",2);
 			bez_mark=nf.advertise<visualization_msgs::Marker>("bez",2);
 			vehicle_detect=nf.advertise<visualization_msgs::Marker>("vehicle_detect",2);
 			driver_pub = nf.advertise<ackermann_msgs::AckermannDriveStamped>(drive_topic, 1);
@@ -2539,10 +2545,10 @@ class GapBarrier
 
 				double bez_x1=std::max(vel_adapt,min_speed)/4*bez_t_end; //Set the fixed point values here
 				double bez_y2=4.0/3.0*pow(bez_x1,2)*tan(last_delta)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
-				double bez_x4=(obstacle_points_l[0][0] + obstacle_points_r[obstacle_points_r.size()-1][0]) / 2;
-				double bez_y4=(obstacle_points_l[0][1] + obstacle_points_r[obstacle_points_r.size()-1][1]) / 2;
-				// double bez_x4=max_jump_point[0];
-				// double bez_y4=max_jump_point[1];
+				// double bez_x4=(obstacle_points_l[0][0] + obstacle_points_r[obstacle_points_r.size()-1][0]) / 2;
+				// double bez_y4=(obstacle_points_l[0][1] + obstacle_points_r[obstacle_points_r.size()-1][1]) / 2;
+				double bez_x4=max_jump_point[0];
+				double bez_y4=max_jump_point[1];
 
 				std::vector<double> opt_params1;
 				std::vector<double> opt_params2;
@@ -2850,6 +2856,54 @@ class GapBarrier
 				jump_marker.points.push_back(p7); 	// Last point in right obstacles
 
 				jump.publish(jump_marker);
+
+
+				//Publish the safe distance radius
+				safe_marker.header.frame_id = base_frame;
+				safe_marker.header.stamp = ros::Time::now();
+				safe_marker.type = visualization_msgs::Marker::CYLINDER;
+				safe_marker.id = 0; 
+				safe_marker.action = visualization_msgs::Marker::ADD;
+				safe_marker.color.a = 1.0;
+				safe_marker.color.r = 0; 
+				safe_marker.color.g = 1;
+				safe_marker.color.b = 0;
+				safe_marker.pose.orientation.w = 1;
+				safe_marker.lifetime = ros::Duration(0.1);
+
+				safe_marker.scale.x = safe_distance*2;
+				safe_marker.scale.y = safe_distance*2;
+				safe_marker.scale.z = 0.2;
+
+				safe_marker.pose.position.x = x_vehicle[0];
+				safe_marker.pose.position.y = y_vehicle[0];
+				safe_marker.pose.position.z = 0;
+
+				safe_scan.publish(safe_marker);
+
+
+				//Publish the max scan distance radius
+				max_range_marker.header.frame_id = base_frame;
+				max_range_marker.header.stamp = ros::Time::now();
+				max_range_marker.type = visualization_msgs::Marker::CYLINDER;
+				max_range_marker.id = 0; 
+				max_range_marker.action = visualization_msgs::Marker::ADD;
+				max_range_marker.color.a = 1.0;
+				max_range_marker.color.r = 1; 
+				max_range_marker.color.g = 0;
+				max_range_marker.color.b = 0;
+				max_range_marker.pose.orientation.w = 1;
+				max_range_marker.lifetime = ros::Duration(0.1);
+
+				max_range_marker.scale.x = max_lidar_range*2;
+				max_range_marker.scale.y = max_lidar_range*2;
+				max_range_marker.scale.z = 0.1;
+
+				max_range_marker.pose.position.x = x_vehicle[0];
+				max_range_marker.pose.position.y = y_vehicle[0];
+				max_range_marker.pose.position.z = 0;
+
+				max_scan.publish(max_range_marker);
 
 
 
