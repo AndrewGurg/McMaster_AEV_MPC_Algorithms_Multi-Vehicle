@@ -126,7 +126,9 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 	double y2=xopt[1][2];
 	double potfield_factor=xopt[0][3];
 	double vel_factor=xopt[1][3];
-	int num_param_pairs = 4;
+	double max_jump_x=xopt[0][4];
+	double max_jump_y=xopt[1][4];
+	int num_param_pairs = 5;
 	std::vector<std::vector<double>> bez_curv;
 	//Optimization variables:
 	//[0] -> x2
@@ -178,7 +180,7 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 		
 		// Additional objective term favoring high velocities
 		double vel2 = pow(x_dot,2)+pow(y_dot,2);
-		funcreturn=funcreturn + (vel_factor/vel2);// Sum of reciprocal squared velocities 
+		funcreturn=funcreturn + (10/vel2);// Sum of reciprocal squared velocities 
 		if(grad){
 		/*M_x2*/	grad[0]=grad[0]-(vel_factor/pow(vel2,2))*2*x_dot*pdx2;
 		/*M_x3*/	grad[1]=grad[1]-(vel_factor/pow(vel2,2))*2*x_dot*pdx3;
@@ -186,7 +188,18 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 		/*M_x4*/	grad[3]=grad[3]-(vel_factor/pow(vel2,2))*2*x_dot*pdx4;
 		/*M_y4*/	grad[4]=grad[4]-(vel_factor/pow(vel2,2))*2*y_dot*pdy4;
 		}		
+
+				
 		
+	}
+
+	// Additional objective term favoring bezier curve final point proximity to lookahead point
+	double dist = sqrt(pow(max_jump_x - x[3],2)+pow(max_jump_y-x[4],2));
+	funcreturn = funcreturn + (vel_factor*dist);// Sum of reciprocal squared velocities 
+	if(grad){
+	// M_x2,x3,y3 = 0
+	/*M_x4*/	grad[3]=grad[3]+(vel_factor/dist)*(x[3]-max_jump_x);
+	/*M_y4*/	grad[4]=grad[4]+(vel_factor/dist)*(x[4]-max_jump_y);
 	}
 
 	return funcreturn;
@@ -512,7 +525,9 @@ class GapBarrier
 		ros::Publisher lobs;
 		ros::Publisher robs;
 		ros::Publisher scan_gap;
+		ros::Publisher jump;
 		ros::Publisher bez_mark;
+		ros::Publisher bez_guess_mark;
 		ros::Publisher vehicle_detect;
 		ros::Publisher driver_pub;
 		ros::Publisher cv_ranges_pub;
@@ -558,7 +573,9 @@ class GapBarrier
 		visualization_msgs::Marker lobs_marker;
 		visualization_msgs::Marker robs_marker;
 		visualization_msgs::Marker scan_gap_marker;
+		visualization_msgs::Marker jump_marker;
 		visualization_msgs::Marker bez;
+		visualization_msgs::Marker bez_guess;
 		visualization_msgs::Marker vehicle_detect_path;
 
 		//steering & stop time
@@ -903,7 +920,9 @@ class GapBarrier
 			lobs=nf.advertise<visualization_msgs::Marker>("lobs",2);
 			robs=nf.advertise<visualization_msgs::Marker>("robs",2);
 			scan_gap=nf.advertise<visualization_msgs::Marker>("scan_gap",2);
+			jump=nf.advertise<visualization_msgs::Marker>("jump",2);
 			bez_mark=nf.advertise<visualization_msgs::Marker>("bez",2);
+			bez_guess_mark=nf.advertise<visualization_msgs::Marker>("bez_guess",2);
 			vehicle_detect=nf.advertise<visualization_msgs::Marker>("vehicle_detect",2);
 			driver_pub = nf.advertise<ackermann_msgs::AckermannDriveStamped>(drive_topic, 1);
 
@@ -1925,191 +1944,29 @@ class GapBarrier
 		}
 
 
-		void getWalls(std::vector<std::vector<double>> obstacle_points_l, std::vector<std::vector<double>> obstacle_points_r,
-		std::vector<double> wl0, std::vector<double> wr0, double alpha, std::vector<double> &wr, std::vector<double> &wl,
-		std::vector<double> &wc){
-			if(!optim_mode){
-				//right
-				quadprogpp::Matrix<double> Gr,CEr,CIr;
-				quadprogpp::Vector<double> gr0,ce0r,ci0r,xr;
-				int n,m,p; char ch;
-				int n_obs_r = obstacle_points_r.size(); int n_obs_l = obstacle_points_l.size();
+		int find_max_jump(std::vector<float> ranges, std::vector<double> angles){
+			// Finds the largest jump in scan data, then returns the point in the center of that jump.
+			double max_jump = 0;	// Size of jump
+			int max_idx;		// Index of start of jump
+			double jump;
 
-
-				//left
-				n = 2; m = 0; p = n_obs_l;
-				quadprogpp::Matrix<double> Gl, CEl, CIl;
-				quadprogpp::Vector<double> gl0, ce0l, ci0l, xl;
-
-				//left matrices
-				Gl.resize(n,n);
-				{
-					std::istringstream is("1.0, 0.0,"
-														"0.0, 1.0 ");
-
-					for(int i=0; i < n; ++i)
-						for(int j=0; j < n; ++j)
-							is >> Gl[i][j] >> ch;
-				}
-				gl0.resize(n);
-				{
-					for(int i =0; i < int(wl0.size()); ++i) gl0[i] = wl0[i] * (alpha-1);
-				}
-				CEl.resize(n,m);
-				{
-					CEl[0][0] = 0.0;
-					CEl[1][0] = 0.0;
-				}
-				ce0l.resize(m);
-
-				CIl.resize(n,p);
-				{
-					for(int i=0; i < p; ++i){
-						CIl[0][i] = -obstacle_points_l[i][0];
-						CIl[1][i] = -obstacle_points_l[i][1]; 
-					}
-				}
-				ci0l.resize(p);
-				{
-					for(int i =0; i < p; ++i) ci0l[i] = -1.0;
-				}
-
-				xl.resize(n);
-				// std::stringstream ss;
-				solve_quadprog(Gl, gl0, CEl, ce0l, CIl, ci0l, xl);
-				wl[0] = xl[0]; wl[1] = xl[1];
-
-
-				p = n_obs_r;
-				//right matrices
-				Gr.resize(n,n);
-				{
-					std::istringstream is("1.0, 0.0,"
-													"0.0, 1.0 ");
-
-					for(int i =0; i < n; ++i)
-						for(int j=0; j < n; ++j)
-							is >> Gr[i][j] >> ch;
-
-				}
-
-				gr0.resize(n);
-				{
-					for(int i = 0; i < int(wr0.size()); ++i) gr0[i] = wr0[i] * (alpha-1);
-				}
-
-				CEr.resize(n,m);
-				{
-					CEr[0][0] = 0.0;
-					CEr[1][0] = 0.0;
-				}
-				ce0r.resize(m);
-
-				
-				CIr.resize(n,p);
-				{
-						for(int i =0; i < p; ++i){
-							CIr[0][i] = -obstacle_points_r[i][0];
-							CIr[1][i] = -obstacle_points_r[i][1];
-						}
-				}
-
-				ci0r.resize(p);
-				{
-					for(int i =0; i < p; ++i) ci0r[i] = -1.0;
-				}
-
-				xr.resize(n);
-				solve_quadprog(Gr, gr0, CEr, ce0r, CIr, ci0r, xr);
-				// ss << xr[0] << " " << xr[1];
-				wr[0] = xr[0]; wr[1] = xr[1]; 
-
-
-
+			// Only look ahead of the vehicle
+			for(int i =right_ind_MPC; i < left_ind_MPC; ++i){
+				// Get jump between this index and next
+				jump = std::abs(ranges[i]-ranges[i+1]);
+				// Compare with max
+				if (jump > max_jump){
+					max_jump = jump;
+					max_idx = i;
+				} 
 			}
-			else{
-				quadprogpp::Matrix<double> G,CE,CI;
-				quadprogpp::Vector<double> gi0, ce0, ci0, x;
-
-				// char ch;
-				int n_obs_l = obstacle_points_l.size(); int n_obs_r = obstacle_points_r.size();
-				
-				
-				int n,m,p;
-				n = 3; m = 0; p = n_obs_l + n_obs_r + 2;
-
-				G.resize(n,n);
-				{
-					// std::istringstream is("1.0, 0.0, 0.0,"
-					// 						"0.0, 1.0, 0.0,"
-					// 						"0.0, 0.0, 0.0001");
-
-					// for(int i =0; i < n; ++i)
-					// 	for(int j =0; j < n-1; ++j)
-					// 		is >> G[i][j] >> ch;
-
-
-					G[0][1] = G[0][2] = G[1][0] = G[1][2] = G[2][0] = G[2][1] = 0.0;
-					G[0][0] = G[1][1] = 1.0;
-					G[2][2] = 0.0001;
-
-				}
-				gi0.resize(n);
-				{
-					for(int i =0; i < n; ++i) gi0[i] = 0.0;
-				}
-
-				CE.resize(n,m);
-				{
-					CE[0][0] = 0.0;
-					CE[1][0] = 0.0;
-					CE[2][0] = 0.0;
-				}
-				ce0.resize(m);
-
-				CI.resize(n,p);
-				{
-					for(int i =0; i < n_obs_r; ++i){
-						CI[0][i] = obstacle_points_r[i][0];
-						CI[1][i] = obstacle_points_r[i][1];
-						CI[2][i] = 1.0;
-					}
-
-					for(int i = n_obs_r; i < n_obs_l + n_obs_r; ++i){
-						CI[0][i] = -obstacle_points_l[i-n_obs_r][0];
-						CI[1][i] = -obstacle_points_l[i-n_obs_r][1];
-						CI[2][i] = -1.0;
-					}
-
-					CI[0][n_obs_l+n_obs_r] = 0.0; CI[1][n_obs_l+n_obs_r] = 0.0; CI[2][n_obs_l+n_obs_r] = 1.0;
-					CI[0][n_obs_l+n_obs_r+1] = 0.0; CI[1][n_obs_l+n_obs_r+1] = 0.0; CI[2][n_obs_l+n_obs_r+1] = -1.0;
-
-				}
-				ci0.resize(p);
-				{
-					for(int i =0; i < n_obs_r+n_obs_l; ++i){
-						ci0[i] = -1.0;
-					}
-					
-					ci0[n_obs_r+n_obs_l] = 0.9; ci0[n_obs_r+n_obs_l+1] = 0.9;
-				}
-				x.resize(n);
-
-				solve_quadprog(G, gi0, CE, ce0, CI, ci0, x);
-
-
-
-				wr[0] = (x[0]/(x[2]-1)); wr[1] = (x[1]/(x[2]-1));
-
-				wl[0] = (x[0]/(x[2]+1)); wl[1] = (x[1]/(x[2]+1));
-
-				wc[0] = (x[0]/(x[2])); wc[1] = (x[1]/(x[2]));
-
-				
-
-			}
-
+			// Return center point in the middle of the jump
+			// double r = (ranges[max_idx] + ranges[max_idx + 1])/2;
+			// double theta = (angles[max_idx] + angles[max_idx + 1])/2;
+			return max_idx;
+			//return std::make_pair(r*cos(theta), r*sin(theta));
 		}
+
 		
 
 		void visualize_detections(){
@@ -2746,9 +2603,15 @@ class GapBarrier
 
 				// All lidar scan modifications done here
 				// Outputs: fused_ranges_MPC_tot0, lidar_transform_angles_tot0
-				printf("fused_ranges size: %d\n",fused_ranges_MPC_tot0.size());
-				printf("transform_angles size: %d\n",lidar_transform_angles_tot0.size());
+				// printf("fused_ranges size: %d\n",fused_ranges_MPC_tot0.size());
+				// printf("transform_angles size: %d\n",lidar_transform_angles_tot0.size());
 
+
+				int max_jump_idx = find_max_jump(fused_ranges_MPC_tot0,lidar_transform_angles_tot0);
+
+				std::vector<double> max_jump_start = {fused_ranges_MPC_tot0[max_jump_idx]*cos(lidar_transform_angles_tot0[max_jump_idx]), fused_ranges_MPC_tot0[max_jump_idx]*sin(lidar_transform_angles_tot0[max_jump_idx])};
+				std::vector<double> max_jump_end   = {fused_ranges_MPC_tot0[max_jump_idx+1]*cos(lidar_transform_angles_tot0[max_jump_idx+1]), fused_ranges_MPC_tot0[max_jump_idx+1]*sin(lidar_transform_angles_tot0[max_jump_idx+1])};
+				std::vector<double> max_jump_point = {(max_jump_start[0] + max_jump_end[0])/2, (max_jump_start[1] + max_jump_end[1])/2};
 
 
 
@@ -2849,16 +2712,24 @@ class GapBarrier
 
 				std::vector<double> opt_params1;
 				std::vector<double> opt_params2;
-				int num_param_pairs_1 = 4;
+				int num_param_pairs_1 = 5;
 				int num_param_pairs_2 = 9;
 
-				opt_params1.push_back(num_obs+num_param_pairs_1); opt_params1.push_back(bez_ctrl_pts); opt_params1.push_back(bez_curv_pts); opt_params1.push_back(bez_alpha); opt_params1.push_back(bez_x1); opt_params1.push_back(bez_y2);
-				opt_params1.push_back(pot_field_factor_F_QBMPC); opt_params1.push_back(velocity_factor_F_QBMPC);
+				opt_params1.push_back(num_obs+num_param_pairs_1); 	opt_params1.push_back(bez_ctrl_pts); 
+				opt_params1.push_back(bez_curv_pts); 				opt_params1.push_back(bez_alpha); 
+				opt_params1.push_back(bez_x1); 						opt_params1.push_back(bez_y2);
+				opt_params1.push_back(pot_field_factor_F_QBMPC); 	opt_params1.push_back(velocity_factor_F_QBMPC); 
+				opt_params1.push_back(max_jump_point[0]); 			opt_params1.push_back(max_jump_point[1]); 
 
-				opt_params2.push_back(num_obs+num_param_pairs_2); opt_params2.push_back(bez_ctrl_pts); opt_params2.push_back(bez_curv_pts); opt_params2.push_back(bez_beta); opt_params2.push_back(bez_x1); opt_params2.push_back(bez_y2);
-				opt_params2.push_back(max_speed); opt_params2.push_back(min_speed); opt_params2.push_back(max_accel); opt_params2.push_back(max_steering_angle); opt_params2.push_back(max_servo_speed);
-				opt_params2.push_back(bez_t_end); opt_params2.push_back(wheelbase); opt_params2.push_back(bez_min_dist); opt_params2.push_back(theta_band_smooth); opt_params2.push_back(theta_band_diff);
-				opt_params2.push_back(vel_beta); opt_params2.push_back(stop_dist_decay);
+				opt_params2.push_back(num_obs+num_param_pairs_2); opt_params2.push_back(bez_ctrl_pts); 
+				opt_params2.push_back(bez_curv_pts); 		opt_params2.push_back(bez_beta); 
+				opt_params2.push_back(bez_x1); 				opt_params2.push_back(bez_y2);
+				opt_params2.push_back(max_speed); 			opt_params2.push_back(min_speed); 
+				opt_params2.push_back(max_accel); 			opt_params2.push_back(max_steering_angle); 
+				opt_params2.push_back(max_servo_speed); 	opt_params2.push_back(bez_t_end); 
+				opt_params2.push_back(wheelbase); 			opt_params2.push_back(bez_min_dist); 
+				opt_params2.push_back(theta_band_smooth); 	opt_params2.push_back(theta_band_diff);
+				opt_params2.push_back(vel_beta); 			opt_params2.push_back(stop_dist_decay);
 
 				for (int i=0; i<num_obs;i++){ //Add all subsampled obstacles to the parameters
 					opt_params1.push_back(sub_bez_obs[i][0]);
@@ -2875,14 +2746,26 @@ class GapBarrier
 				nlopt_set_xtol_rel(opt, 0.001); //Termination parameters
 				nlopt_set_maxtime(opt, 0.05);
 
-				double x[bez_ctrl_pts*2-5];  /* `*`some` `initial` `guess`*` */
 
+				double init_guess[bez_ctrl_pts*2-5];	/* `*`some` `initial` `guess`*` */
 				//Try new attempt at initial guess
+				init_guess[0]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
+				init_guess[1]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]),max_lidar_range-1e-6); //x3
+				init_guess[2]=std::min(std::max(-max_lidar_range+1e-6,yptplot[0]),max_lidar_range-1e-6); //y3
+				init_guess[3]=std::min(std::max(-max_lidar_range+1e-6,xptplot[1]),max_lidar_range-1e-6); //x4
+				init_guess[4]=std::min(std::max(-max_lidar_range+1e-6,yptplot[1]),max_lidar_range-1e-6); //y4
+				// Try lookahead point for initial guess 
+				// init_guess[3]=std::min(std::max(-max_lidar_range+1e-6,max_jump_point[0]),max_lidar_range-1e-6); //x4
+				// init_guess[4]=std::min(std::max(-max_lidar_range+1e-6,max_jump_point[1]),max_lidar_range-1e-6); //y4
+
+				double x[bez_ctrl_pts*2-5];
 				x[0]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
 				x[1]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]),max_lidar_range-1e-6); //x3
 				x[2]=std::min(std::max(-max_lidar_range+1e-6,yptplot[0]),max_lidar_range-1e-6); //y3
 				x[3]=std::min(std::max(-max_lidar_range+1e-6,xptplot[1]),max_lidar_range-1e-6); //x4
 				x[4]=std::min(std::max(-max_lidar_range+1e-6,yptplot[1]),max_lidar_range-1e-6); //y4
+				// x[3]=std::min(std::max(-max_lidar_range+1e-6,max_jump_point[0]),max_lidar_range-1e-6); //x4
+				// x[4]=std::min(std::max(-max_lidar_range+1e-6,max_jump_point[1]),max_lidar_range-1e-6); //y4
 
 				int successful_opt=0;
 
@@ -3124,8 +3007,70 @@ class GapBarrier
 				scan_gap.publish(scan_gap_marker);
 
 
+				//Publish the largest jump
+				jump_marker.header.frame_id = base_frame;
+				jump_marker.header.stamp = ros::Time::now();
+				jump_marker.type = visualization_msgs::Marker::LINE_LIST;
+				jump_marker.id = 0; 
+				jump_marker.action = visualization_msgs::Marker::ADD;
+				jump_marker.scale.x = 0.1;
+				jump_marker.color.a = 1.0;
+				jump_marker.color.r = 1; 
+				jump_marker.color.g = 0;
+				jump_marker.color.b = 1;
+				jump_marker.pose.orientation.w = 1;
+				
+				jump_marker.lifetime = ros::Duration(0.1);
 
-				//Publish the bezier points
+				geometry_msgs::Point p7;
+				jump_marker.points.clear();
+				
+				p7.x = max_jump_start[0];	p7.y = max_jump_start[1];	p7.z = 0;
+				jump_marker.points.push_back(p7); 	// First point in left obstacles
+
+				p7.x = max_jump_end[0];	p7.y = max_jump_end[1];	p7.z = 0;
+				jump_marker.points.push_back(p7); 	// Last point in right obstacles
+
+				jump.publish(jump_marker);
+
+
+				//Publish the initial bezier curve guess
+				bez_guess.header.frame_id = base_frame;
+				bez_guess.header.stamp = ros::Time::now();
+				bez_guess.type = visualization_msgs::Marker::POINTS;
+				bez_guess.id = 0; 
+				bez_guess.ns = "points";
+				bez_guess.action = visualization_msgs::Marker::ADD;
+				bez_guess.scale.x = 0.1;
+				bez_guess.color.a = 1.0;
+				bez_guess.color.r = 0.2; 
+				bez_guess.color.g = 0.2;
+				bez_guess.color.b = 0.4;
+				bez_guess.pose.orientation.w = 1;
+
+				bez_guess.scale.x = 0.1;  // Size of points
+				bez_guess.scale.y = 0.1;
+				
+				bez_guess.lifetime = ros::Duration(0.1);
+				geometry_msgs::Point p8;
+				bez_guess.points.clear();
+				for (const auto& obstacle1 : sub_bez_obs) {
+					p8.x = obstacle1[0]; p8.y = obstacle1[1]; p8.z = 0;
+					bez_guess.points.push_back(p8);
+				}
+
+				for(int i=0; i<bez_curv_pts*10; i++){
+					double t=double(i)/double(bez_curv_pts*10-1);
+					double bez_x=4*pow(1-t,3)*t*bez_x1+6*pow(1-t,2)*pow(t,2)*init_guess[0]+4*(1-t)*pow(t,3)*init_guess[1]+pow(t,4)*init_guess[3];
+					double bez_y=6*pow(1-t,2)*pow(t,2)*bez_y2+4*(1-t)*pow(t,3)*init_guess[2]+pow(t,4)*init_guess[4]; //y1=0
+					p8.x = bez_x; p8.y = bez_y; p8.z = 0;
+					bez_guess.points.push_back(p8);
+				}
+
+				bez_guess_mark.publish(bez_guess);
+
+
+				//Publish the bezier curve
 				bez.header.frame_id = base_frame;
 				bez.header.stamp = ros::Time::now();
 				bez.type = visualization_msgs::Marker::POINTS;

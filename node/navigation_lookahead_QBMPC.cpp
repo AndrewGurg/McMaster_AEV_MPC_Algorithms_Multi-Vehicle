@@ -439,6 +439,7 @@ class GapBarrier
 		ros::Publisher safe_scan;
 		ros::Publisher max_scan;
 		ros::Publisher bez_mark;
+		ros::Publisher bez_guess_mark;
 		ros::Publisher vehicle_detect;
 		ros::Publisher driver_pub;
 		ros::Publisher cv_ranges_pub;
@@ -486,6 +487,7 @@ class GapBarrier
 		visualization_msgs::Marker lobs_marker;
 		visualization_msgs::Marker robs_marker;
 		visualization_msgs::Marker bez;
+		visualization_msgs::Marker bez_guess;
 		visualization_msgs::Marker vehicle_detect_path;
 		visualization_msgs::Marker scan_gap_marker;
 		visualization_msgs::Marker jump_marker;
@@ -838,6 +840,7 @@ class GapBarrier
 			safe_scan=nf.advertise<visualization_msgs::Marker>("safe_scan",2);
 			max_scan=nf.advertise<visualization_msgs::Marker>("max_scan",2);
 			bez_mark=nf.advertise<visualization_msgs::Marker>("bez",2);
+			bez_guess_mark=nf.advertise<visualization_msgs::Marker>("bez_guess",2);
 			vehicle_detect=nf.advertise<visualization_msgs::Marker>("vehicle_detect",2);
 			driver_pub = nf.advertise<ackermann_msgs::AckermannDriveStamped>(drive_topic, 1);
 
@@ -2581,8 +2584,13 @@ class GapBarrier
 				nlopt_set_xtol_rel(opt, 0.001); //Termination parameters
 				nlopt_set_maxtime(opt, 0.05);
 
-				double x[bez_ctrl_pts*2-num_fixed_pts];  /* `*`some` `initial` `guess`*` */
+				double init_guess[bez_ctrl_pts*2-num_fixed_pts];	/* `*`some` `initial` `guess`*` */
+				//Try new attempt at initial guess
+				init_guess[0]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
+				init_guess[1]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]),max_lidar_range-1e-6); //x3
+				init_guess[2]=std::min(std::max(-max_lidar_range+1e-6,yptplot[0]),max_lidar_range-1e-6); //y3
 
+				double x[bez_ctrl_pts*2-num_fixed_pts];  /* `*`some` `initial` `guess`*` */
 				//Try new attempt at initial guess
 				x[0]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
 				x[1]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]),max_lidar_range-1e-6); //x3
@@ -2905,6 +2913,42 @@ class GapBarrier
 
 				max_scan.publish(max_range_marker);
 
+
+
+				//Publish the initial bezier curve guess
+				bez_guess.header.frame_id = base_frame;
+				bez_guess.header.stamp = ros::Time::now();
+				bez_guess.type = visualization_msgs::Marker::POINTS;
+				bez_guess.id = 0; 
+				bez_guess.ns = "points";
+				bez_guess.action = visualization_msgs::Marker::ADD;
+				bez_guess.scale.x = 0.1;
+				bez_guess.color.a = 1.0;
+				bez_guess.color.r = 0.2; 
+				bez_guess.color.g = 0.2;
+				bez_guess.color.b = 0.4;
+				bez_guess.pose.orientation.w = 1;
+
+				bez_guess.scale.x = 0.1;  // Size of points
+				bez_guess.scale.y = 0.1;
+				
+				bez_guess.lifetime = ros::Duration(0.1);
+				geometry_msgs::Point p8;
+				bez_guess.points.clear();
+				for (const auto& obstacle1 : sub_bez_obs) {
+					p8.x = obstacle1[0]; p8.y = obstacle1[1]; p8.z = 0;
+					bez_guess.points.push_back(p8);
+				}
+
+				for(int i=0; i<bez_curv_pts*10; i++){
+					double t=double(i)/double(bez_curv_pts*10-1);
+					double bez_x=4*pow(1-t,3)*t*bez_x1+6*pow(1-t,2)*pow(t,2)*init_guess[0]+4*(1-t)*pow(t,3)*init_guess[1]+pow(t,4)*bez_x4;
+					double bez_y=6*pow(1-t,2)*pow(t,2)*bez_y2+4*(1-t)*pow(t,3)*init_guess[2]+pow(t,4)*bez_y4; //y1=0
+					p8.x = bez_x; p8.y = bez_y; p8.z = 0;
+					bez_guess.points.push_back(p8);
+				}
+
+				bez_guess_mark.publish(bez_guess);
 
 
 				//Publish the bezier points
