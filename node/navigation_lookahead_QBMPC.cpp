@@ -148,8 +148,8 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 	//Create the discretized Bezier Curve
 	for(int i=0; i<bez_curv_pts; i++){
 		double t=double(i)/double(bez_curv_pts-1);
-		double bez_x=4*pow(1-t,3)*t*x1+6*pow(1-t,2)*pow(t,2)*x[0]+4*(1-t)*pow(t,3)*x[1]+pow(t,4)*x4;
-		double bez_y=6*pow(1-t,2)*pow(t,2)*y2+4*(1-t)*pow(t,3)*x[2]+pow(t,4)*y4; //y1=0
+		double bez_x=4*pow(1-t,3)*t*x1+6*pow(1-t,2)*pow(t,2)*x[0]+4*(1-t)*pow(t,3)*x[1]+pow(t,4)*x[3];
+		double bez_y=6*pow(1-t,2)*pow(t,2)*y2+4*(1-t)*pow(t,3)*x[2]+pow(t,4)*x[4]; //y1=0
 		bez_curv.push_back({bez_x,bez_y});
 	}
 
@@ -173,21 +173,21 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 		double px2=6*pow(1-t,2)*pow(t,2);
 		double px3=4*(1-t)*pow(t,3);
 		double py3=px3;
-		// double px4=pow(t,4);
-		// double py4=px4;
+		double px4=pow(t,4);
+		double py4=px4;
 
 		// Minimize Distance to the geometric path discretized points
 
 // 		double dist2= pow(bez_curv[i][0]-geo_curv[i][0],2)+pow(bez_curv[i][1]-geo_curv[i][1],2); //Squared distance
 		
-// 		funcreturn=funcreturn+(1.0/dist2)*exp(-bez_alpha*dist2); //Sum of reciprocal squared distances, exponentially decaying weight
+// 		funcreturn=funcreturn+(dist2);//*exp(-bez_alpha*dist2); //Sum of reciprocal squared distances, exponentially decaying weight
 // 		//Next, find grad for each of five variables
 // 		if(grad){
-// /* x2 */ 	grad[0]=grad[0]-1.0*2*(bez_curv[i][0]-geo_curv[i][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px2;
-// /* x3 */ 	grad[1]=grad[1]-1.0*2*(bez_curv[i][0]-geo_curv[i][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px3;
-// /* y3 */ 	grad[2]=grad[2]-1.0*2*(bez_curv[i][1]-geo_curv[i][1])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py3;
-// // /* x4 */ 	grad[3]=grad[3]-1*2*(bez_curv[i][0]-xopt[0][j+4])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px4;
-// // /* y4 */ 	grad[4]=grad[4]-1*2*(bez_curv[i][1]-xopt[1][j+4])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py4;
+// /* x2 */ 	grad[0]=grad[0]+1.0*2*(bez_curv[i][0]-geo_curv[i][0])*px2;
+// /* x3 */ 	grad[1]=grad[1]+1.0*2*(bez_curv[i][0]-geo_curv[i][0])*px3;
+// /* y3 */ 	grad[2]=grad[2]+1.0*2*(bez_curv[i][1]-geo_curv[i][1])*py3;
+// /* x4 */ 	grad[3]=grad[3]+1.0*2*(bez_curv[i][0]-geo_curv[i][0])*px4;
+// /* y4 */ 	grad[4]=grad[4]+1.0*2*(bez_curv[i][1]-geo_curv[i][1])*py4;
 // 		}
 		
 
@@ -200,26 +200,26 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 	/* x2 */ 	grad[0]=grad[0]-potfield_factor*2*(bez_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px2;
 	/* x3 */ 	grad[1]=grad[1]-potfield_factor*2*(bez_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px3;
 	/* y3 */ 	grad[2]=grad[2]-potfield_factor*2*(bez_curv[i][1]-xopt[1][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py3;
-	// /* x4 */ 	grad[3]=grad[3]-potfield_factor*2*(bez_curv[i][0]-xopt[0][j+4])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px4;
-	// /* y4 */ 	grad[4]=grad[4]-potfield_factor*2*(bez_curv[i][1]-xopt[1][j+4])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py4;
+	/* x4 */ 	grad[3]=grad[3]-potfield_factor*2*(bez_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px4;
+	/* y4 */ 	grad[4]=grad[4]-potfield_factor*2*(bez_curv[i][1]-xopt[1][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py4;
 			}
 		}
 		
-		// // Variables used in velocity term and gradients
-		// double x_dot=4*x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x4*pow(t,3);
-		// double y_dot=6*y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*y4*pow(t,3);
-		// double pdx2=6*(4*pow(t,3)-6*pow(t,2)+2*t);double pdx3=4*(-4*pow(t,3)+3*pow(t,2));double pdy3=pdx3;double pdx4=4*pow(t,3);double pdy4=pdx4; //X_dot & y_dot
+		// Variables used in velocity term and gradients
+		double x_dot=4*x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
+		double y_dot=6*y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
+		double pdx2=6*(4*pow(t,3)-6*pow(t,2)+2*t);double pdx3=4*(-4*pow(t,3)+3*pow(t,2));double pdy3=pdx3;double pdx4=4*pow(t,3);double pdy4=pdx4; //X_dot & y_dot
 		
-		// // Additional objective term favoring high velocities
-		// double vel2 = pow(x_dot,2)+pow(y_dot,2);
-		// funcreturn=funcreturn + (vel_factor/vel2);// Sum of reciprocal squared velocities 
-		// if(grad){
-		// /*M_x2*/	grad[0]=grad[0]-(vel_factor/pow(vel2,2))*2*x_dot*pdx2;
-		// /*M_x3*/	grad[1]=grad[1]-(vel_factor/pow(vel2,2))*2*x_dot*pdx3;
-		// /*M_y3*/	grad[2]=grad[2]-(vel_factor/pow(vel2,2))*2*y_dot*pdy3;
-		// /*M_x4*/	grad[3]=grad[3]-(vel_factor/pow(vel2,2))*2*x_dot*pdx4;
-		// /*M_y4*/	grad[4]=grad[4]-(vel_factor/pow(vel2,2))*2*y_dot*pdy4;
-		// }		
+		// Additional objective term favoring high velocities
+		double vel2 = pow(x_dot,2)+pow(y_dot,2);
+		funcreturn=funcreturn + (vel_factor/vel2);// Sum of reciprocal squared velocities 
+		if(grad){
+		/*M_x2*/	grad[0]=grad[0]-(vel_factor/pow(vel2,2))*2*x_dot*pdx2;
+		/*M_x3*/	grad[1]=grad[1]-(vel_factor/pow(vel2,2))*2*x_dot*pdx3;
+		/*M_y3*/	grad[2]=grad[2]-(vel_factor/pow(vel2,2))*2*y_dot*pdy3;
+		/*M_x4*/	grad[3]=grad[3]-(vel_factor/pow(vel2,2))*2*x_dot*pdx4;
+		/*M_y4*/	grad[4]=grad[4]-(vel_factor/pow(vel2,2))*2*y_dot*pdy4;
+		}		
 		
 	}
 
@@ -250,9 +250,9 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 	double t_end=xopt[1][5]; //Temporal scaling of the Bezier Curve
 	double wheelbase=xopt[0][6]; //Physical constant property of vehicle
 	double bez_min_dist=xopt[1][6]; //Our constraint on minimum distance to an obstacle
-	double x4=xopt[0][7]; //These are fixed by initial conditions and thus aren't variables in optimization
-	double y4=xopt[1][7];
-	int num_param_pairs = 8;
+	// double x4=xopt[0][7]; //These are fixed by initial conditions and thus aren't variables in optimization
+	// double y4=xopt[1][7];
+	int num_param_pairs = 7;
 	std::vector<std::vector<double>> bez_curv;
 	//Optimization variables:
 	//[0] -> x2
@@ -264,8 +264,8 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 	//Create the discretized Bezier Curve
 	for(int i=0; i<bez_curv_pts; i++){
 		double t=double(i)/double(bez_curv_pts-1);
-		double bez_x=4*pow(1-t,3)*t*x1+6*pow(1-t,2)*pow(t,2)*x[0]+4*(1-t)*pow(t,3)*x[1]+pow(t,4)*x4;
-		double bez_y=6*pow(1-t,2)*pow(t,2)*y2+4*(1-t)*pow(t,3)*x[2]+pow(t,4)*y4; //y1=0
+		double bez_x=4*pow(1-t,3)*t*x1+6*pow(1-t,2)*pow(t,2)*x[0]+4*(1-t)*pow(t,3)*x[1]+pow(t,4)*x[3];
+		double bez_y=6*pow(1-t,2)*pow(t,2)*y2+4*(1-t)*pow(t,3)*x[2]+pow(t,4)*x[4]; //y1=0
 		bez_curv.push_back({bez_x,bez_y});
 	}
 
@@ -283,13 +283,13 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 
 	for(int i=0;i<bez_curv_pts; i++){
 		double t=double(i)/double(bez_curv_pts-1);
-		double x_dot=4*x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x4*pow(t,3);
-		double x_ddot=4*x1*(-12*pow(t,2)+18*t-6)+6*x[0]*(12*pow(t,2)-12*t+2)+4*x[1]*(-12*pow(t,2)+6*t)+12*x4*pow(t,2);
-		double x_dddot=4*x1*(-24*t+18)+6*x[0]*(24*t-12)+4*x[1]*(-24*t+6)+24*x4*t;
+		double x_dot=4*x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
+		double x_ddot=4*x1*(-12*pow(t,2)+18*t-6)+6*x[0]*(12*pow(t,2)-12*t+2)+4*x[1]*(-12*pow(t,2)+6*t)+12*x[3]*pow(t,2);
+		double x_dddot=4*x1*(-24*t+18)+6*x[0]*(24*t-12)+4*x[1]*(-24*t+6)+24*x[3]*t;
 
-		double y_dot=6*y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*y4*pow(t,3);
-		double y_ddot=6*y2*(12*pow(t,2)-12*t+2)+4*x[2]*(-12*pow(t,2)+6*t)+12*y4*pow(t,2);
-		double y_dddot=6*y2*(24*t-12)+4*x[2]*(-24*t+6)+24*y4*t;
+		double y_dot=6*y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
+		double y_ddot=6*y2*(12*pow(t,2)-12*t+2)+4*x[2]*(-12*pow(t,2)+6*t)+12*x[4]*pow(t,2);
+		double y_dddot=6*y2*(24*t-12)+4*x[2]*(-24*t+6)+24*x[4]*t;
 
 		double curv=(x_dot*y_ddot-y_dot*x_ddot)/(pow(pow(x_dot,2)+pow(y_dot,2),1.5));
 		double curv_dot=((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))/pow((pow(x_dot,2)+pow(y_dot,2)),2.5);
@@ -302,20 +302,20 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 		double pcurvx2=((y_ddot*pdx2-y_dot*pddx2)*(pow(x_dot,2)+pow(y_dot,2))-3*x_dot*pdx2*(x_dot*y_ddot-y_dot*x_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2.5);
 		double pcurvx3=((y_ddot*pdx3-y_dot*pddx3)*(pow(x_dot,2)+pow(y_dot,2))-3*x_dot*pdx3*(x_dot*y_ddot-y_dot*x_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2.5);
 		double pcurvy3=((x_dot*pddy3-x_ddot*pdy3)*(pow(x_dot,2)+pow(y_dot,2))-3*y_dot*pdy3*(x_dot*y_ddot-y_dot*x_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2.5);
-		// double pcurvx4=((y_ddot*pdx4-y_dot*pddx4)*(pow(x_dot,2)+pow(y_dot,2))-3*x_dot*pdx4*(x_dot*y_ddot-y_dot*x_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2.5);
-		// double pcurvy4=((x_dot*pddy4-x_ddot*pdy4)*(pow(x_dot,2)+pow(y_dot,2))-3*y_dot*pdy4*(x_dot*y_ddot-y_dot*x_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2.5);
+		double pcurvx4=((y_ddot*pdx4-y_dot*pddx4)*(pow(x_dot,2)+pow(y_dot,2))-3*x_dot*pdx4*(x_dot*y_ddot-y_dot*x_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2.5);
+		double pcurvy4=((x_dot*pddy4-x_ddot*pdy4)*(pow(x_dot,2)+pow(y_dot,2))-3*y_dot*pdy4*(x_dot*y_ddot-y_dot*x_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2.5);
 		
 		double num_pdcurvx2=(y_dddot*pdx2-y_dot*pdddx2)*(pow(x_dot,2)+pow(y_dot,2))+2*x_dot*pdx2*(x_dot*y_dddot-y_dot*x_dddot)-3*((x_dot*pddx2+x_ddot*pdx2)*(x_dot*y_ddot-y_dot*x_ddot)+(y_ddot*pdx2-y_dot*pddx2)*(x_dot*x_ddot+y_dot*y_ddot));
 		double num_pdcurvx3=(y_dddot*pdx3-y_dot*pdddx3)*(pow(x_dot,2)+pow(y_dot,2))+2*x_dot*pdx3*(x_dot*y_dddot-y_dot*x_dddot)-3*((x_dot*pddx3+x_ddot*pdx3)*(x_dot*y_ddot-y_dot*x_ddot)+(y_ddot*pdx3-y_dot*pddx3)*(x_dot*x_ddot+y_dot*y_ddot));
 		double num_pdcurvy3=(x_dot*pdddy3-x_dddot*pdy3)*(pow(x_dot,2)+pow(y_dot,2))+2*y_dot*pdy3*(x_dot*y_dddot-y_dot*x_dddot)-3*((y_dot*pddy3+y_ddot*pdy3)*(x_dot*y_ddot-y_dot*x_ddot)+(x_dot*pddy3-x_ddot*pdy3)*(x_dot*x_ddot+y_dot*y_ddot));
-		// double num_pdcurvx4=(y_dddot*pdx4-y_dot*pdddx4)*(pow(x_dot,2)+pow(y_dot,2))+2*x_dot*pdx4*(x_dot*y_dddot-y_dot*x_dddot)-3*((x_dot*pddx4+x_ddot*pdx4)*(x_dot*y_ddot-y_dot*x_ddot)+(y_ddot*pdx4-y_dot*pddx4)*(x_dot*x_ddot+y_dot*y_ddot));
-		// double num_pdcurvy4=(x_dot*pdddy4-x_dddot*pdy4)*(pow(x_dot,2)+pow(y_dot,2))+2*y_dot*pdy4*(x_dot*y_dddot-y_dot*x_dddot)-3*((y_dot*pddy4+y_ddot*pdy4)*(x_dot*y_ddot-y_dot*x_ddot)+(x_dot*pddy4-x_ddot*pdy4)*(x_dot*x_ddot+y_dot*y_ddot));
+		double num_pdcurvx4=(y_dddot*pdx4-y_dot*pdddx4)*(pow(x_dot,2)+pow(y_dot,2))+2*x_dot*pdx4*(x_dot*y_dddot-y_dot*x_dddot)-3*((x_dot*pddx4+x_ddot*pdx4)*(x_dot*y_ddot-y_dot*x_ddot)+(y_ddot*pdx4-y_dot*pddx4)*(x_dot*x_ddot+y_dot*y_ddot));
+		double num_pdcurvy4=(x_dot*pdddy4-x_dddot*pdy4)*(pow(x_dot,2)+pow(y_dot,2))+2*y_dot*pdy4*(x_dot*y_dddot-y_dot*x_dddot)-3*((y_dot*pddy4+y_ddot*pdy4)*(x_dot*y_ddot-y_dot*x_ddot)+(x_dot*pddy4-x_ddot*pdy4)*(x_dot*x_ddot+y_dot*y_ddot));
 
 		double pdcurvx2=(num_pdcurvx2*pow(pow(x_dot,2)+pow(y_dot,2),2.5)-((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))*5*pow(pow(x_dot,2)+pow(y_dot,2),1.5)*x_dot*pdx2)/pow(pow(x_dot,2)+pow(y_dot,2),5);
 		double pdcurvx3=(num_pdcurvx3*pow(pow(x_dot,2)+pow(y_dot,2),2.5)-((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))*5*pow(pow(x_dot,2)+pow(y_dot,2),1.5)*x_dot*pdx3)/pow(pow(x_dot,2)+pow(y_dot,2),5);
 		double pdcurvy3=(num_pdcurvy3*pow(pow(x_dot,2)+pow(y_dot,2),2.5)-((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))*5*pow(pow(x_dot,2)+pow(y_dot,2),1.5)*y_dot*pdy3)/pow(pow(x_dot,2)+pow(y_dot,2),5);
-		// double pdcurvx4=(num_pdcurvx4*pow(pow(x_dot,2)+pow(y_dot,2),2.5)-((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))*5*pow(pow(x_dot,2)+pow(y_dot,2),1.5)*x_dot*pdx4)/pow(pow(x_dot,2)+pow(y_dot,2),5);
-		// double pdcurvy4=(num_pdcurvy4*pow(pow(x_dot,2)+pow(y_dot,2),2.5)-((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))*5*pow(pow(x_dot,2)+pow(y_dot,2),1.5)*y_dot*pdy4)/pow(pow(x_dot,2)+pow(y_dot,2),5);
+		double pdcurvx4=(num_pdcurvx4*pow(pow(x_dot,2)+pow(y_dot,2),2.5)-((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))*5*pow(pow(x_dot,2)+pow(y_dot,2),1.5)*x_dot*pdx4)/pow(pow(x_dot,2)+pow(y_dot,2),5);
+		double pdcurvy4=(num_pdcurvy4*pow(pow(x_dot,2)+pow(y_dot,2),2.5)-((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))*5*pow(pow(x_dot,2)+pow(y_dot,2),1.5)*y_dot*pdy4)/pow(pow(x_dot,2)+pow(y_dot,2),5);
 
 
 		//Max and min velocity
@@ -326,14 +326,14 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 	/*M_x2*/grad[num_cons*i*n]=2*x_dot*pdx2;
 	/*M_x3*/grad[num_cons*i*n+1]=2*x_dot*pdx3;
 	/*M_y3*/grad[num_cons*i*n+2]=2*y_dot*pdy3;
-	// /*M_x4*/grad[num_cons*i*n+3]=2*x_dot*pdx4;
-	// /*M_y4*/grad[num_cons*i*n+4]=2*y_dot*pdy4;
+	/*M_x4*/grad[num_cons*i*n+3]=2*x_dot*pdx4;
+	/*M_y4*/grad[num_cons*i*n+4]=2*y_dot*pdy4;
 
 	/*m_x2*/grad[(num_cons*i+1)*n]=-2*x_dot*pdx2;
 	/*m_x3*/grad[(num_cons*i+1)*n+1]=-2*x_dot*pdx3;
 	/*m_y3*/grad[(num_cons*i+1)*n+2]=-2*y_dot*pdy3;
-	// /*m_x4*/grad[(num_cons*i+1)*n+3]=-2*x_dot*pdx4;
-	// /*m_y4*/grad[(num_cons*i+1)*n+4]=-2*y_dot*pdy4;
+	/*m_x4*/grad[(num_cons*i+1)*n+3]=-2*x_dot*pdx4;
+	/*m_y4*/grad[(num_cons*i+1)*n+4]=-2*y_dot*pdy4;
 		}
 
 		//Max change (+ & -) in velocity
@@ -342,17 +342,17 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 		
 
 		if(grad){
-	/*+_x2*/grad[(num_cons*i+2)*n]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx2*x_ddot+pddx2*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx2*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
+	/*+_x2*/grad[(num_cons*i+2)*n]  =2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx2*x_ddot+pddx2*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx2*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
 	/*+_x3*/grad[(num_cons*i+2)*n+1]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx3*x_ddot+pddx3*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx3*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
 	/*+_y3*/grad[(num_cons*i+2)*n+2]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdy3*y_ddot+pddy3*y_dot)*(pow(x_dot,2)+pow(y_dot,2))-y_dot*pdy3*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
-	// /*+_x4*/grad[(num_cons*i+2)*n+3]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx4*x_ddot+pddx4*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
-	// /*+_y4*/grad[(num_cons*i+2)*n+4]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdy4*y_ddot+pddy4*y_dot)*(pow(x_dot,2)+pow(y_dot,2))-y_dot*pdy4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
+	/*+_x4*/grad[(num_cons*i+2)*n+3]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx4*x_ddot+pddx4*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
+	/*+_y4*/grad[(num_cons*i+2)*n+4]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdy4*y_ddot+pddy4*y_dot)*(pow(x_dot,2)+pow(y_dot,2))-y_dot*pdy4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
 
-	/*-_x2*/grad[(num_cons*i+3)*n]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx2*x_ddot+pddx2*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx2*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
+	/*-_x2*/grad[(num_cons*i+3)*n]  =-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx2*x_ddot+pddx2*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx2*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
 	/*-_x3*/grad[(num_cons*i+3)*n+1]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx3*x_ddot+pddx3*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx3*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
 	/*-_y3*/grad[(num_cons*i+3)*n+2]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdy3*y_ddot+pddy3*y_dot)*(pow(x_dot,2)+pow(y_dot,2))-y_dot*pdy3*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
-	// /*-_x4*/grad[(num_cons*i+3)*n+3]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx4*x_ddot+pddx4*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
-	// /*-_y4*/grad[(num_cons*i+3)*n+4]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdy4*y_ddot+pddy4*y_dot)*(pow(x_dot,2)+pow(y_dot,2))-y_dot*pdy4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
+	/*-_x4*/grad[(num_cons*i+3)*n+3]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx4*x_ddot+pddx4*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
+	/*-_y4*/grad[(num_cons*i+3)*n+4]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdy4*y_ddot+pddy4*y_dot)*(pow(x_dot,2)+pow(y_dot,2))-y_dot*pdy4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
 		}
 
 		//Max (+ & -) curvature
@@ -360,17 +360,17 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 		result[num_cons*i+5]=-wheelbase*curv-tan(max_delta);
 
 		if(grad){
-	/*+_x2*/grad[(num_cons*i+4)*n]=wheelbase*pcurvx2;
+	/*+_x2*/grad[(num_cons*i+4)*n]  =wheelbase*pcurvx2;
 	/*+_x3*/grad[(num_cons*i+4)*n+1]=wheelbase*pcurvx3;
 	/*+_y3*/grad[(num_cons*i+4)*n+2]=wheelbase*pcurvy3;
-	// /*+_x4*/grad[(num_cons*i+4)*n+3]=wheelbase*pcurvx4;
-	// /*+_y4*/grad[(num_cons*i+4)*n+4]=wheelbase*pcurvy4;
+	/*+_x4*/grad[(num_cons*i+4)*n+3]=wheelbase*pcurvx4;
+	/*+_y4*/grad[(num_cons*i+4)*n+4]=wheelbase*pcurvy4;
 
-	/*-_x2*/grad[(num_cons*i+5)*n]=-wheelbase*pcurvx2;
+	/*-_x2*/grad[(num_cons*i+5)*n]  =-wheelbase*pcurvx2;
 	/*-_x3*/grad[(num_cons*i+5)*n+1]=-wheelbase*pcurvx3;
 	/*-_y3*/grad[(num_cons*i+5)*n+2]=-wheelbase*pcurvy3;
-	// /*-_x4*/grad[(num_cons*i+5)*n+3]=-wheelbase*pcurvx4;
-	// /*-_y4*/grad[(num_cons*i+5)*n+4]=-wheelbase*pcurvy4;
+	/*-_x4*/grad[(num_cons*i+5)*n+3]=-wheelbase*pcurvx4;
+	/*-_y4*/grad[(num_cons*i+5)*n+4]=-wheelbase*pcurvy4;
 		}
 
 		//Max change (+ & -) in curvature
@@ -381,14 +381,14 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 	/*+_x2*/grad[(num_cons*i+6)*n]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx2-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx2;
 	/*+_x3*/grad[(num_cons*i+6)*n+1]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx3-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx3;
 	/*+_y3*/grad[(num_cons*i+6)*n+2]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvy3-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvy3;
-	// /*+_x4*/grad[(num_cons*i+6)*n+3]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx4-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx4;
-	// /*+_y4*/grad[(num_cons*i+6)*n+4]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvy4-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvy4;
+	/*+_x4*/grad[(num_cons*i+6)*n+3]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx4-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx4;
+	/*+_y4*/grad[(num_cons*i+6)*n+4]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvy4-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvy4;
 
 	/*-_x2*/grad[(num_cons*i+7)*n]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx2+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx2;
 	/*-_x3*/grad[(num_cons*i+7)*n+1]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx3+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx3;
 	/*-_y3*/grad[(num_cons*i+7)*n+2]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvy3+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvy3;
-	// /*-_x4*/grad[(num_cons*i+7)*n+3]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx4+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx4;
-	// /*-_y4*/grad[(num_cons*i+7)*n+4]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvy4+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvy4;
+	/*-_x4*/grad[(num_cons*i+7)*n+3]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx4+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx4;
+	/*-_y4*/grad[(num_cons*i+7)*n+4]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvy4+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvy4;
 		}
 
 
@@ -398,20 +398,20 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 			result[num_cons*i+8]=result[num_cons*i+8]+exp(-1.0*double(bez_beta)*dist1);
 
 			if(grad){
-		/*x2*/	grad[(num_cons*i+8)*n]=grad[(num_cons*i+8)*n]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+7])/dist1*px2;
-		/*x3*/	grad[(num_cons*i+8)*n+1]=grad[(num_cons*i+8)*n+1]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+7])/dist1*px3;
-		/*y3*/	grad[(num_cons*i+8)*n+2]=grad[(num_cons*i+8)*n+2]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+7])/dist1*py3;
-		// /*x4*/	grad[(num_cons*i+8)*n+3]=grad[(num_cons*i+8)*n+3]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+7])/dist1*px4;
-		// /*y4*/	grad[(num_cons*i+8)*n+4]=grad[(num_cons*i+8)*n+4]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+7])/dist1*py4;
+		/*x2*/	grad[(num_cons*i+8)*n]  =grad[(num_cons*i+8)*n]  +exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px2;
+		/*x3*/	grad[(num_cons*i+8)*n+1]=grad[(num_cons*i+8)*n+1]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px3;
+		/*y3*/	grad[(num_cons*i+8)*n+2]=grad[(num_cons*i+8)*n+2]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+num_param_pairs])/dist1*py3;
+		/*x4*/	grad[(num_cons*i+8)*n+3]=grad[(num_cons*i+8)*n+3]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px4;
+		/*y4*/	grad[(num_cons*i+8)*n+4]=grad[(num_cons*i+8)*n+4]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+num_param_pairs])/dist1*py4;
 			}
 		}
 		if(grad){
 
-			grad[(num_cons*i+8)*n]=-grad[(num_cons*i+8)*n]/result[num_cons*i+8];
+			grad[(num_cons*i+8)*n]  =-grad[(num_cons*i+8)*n]  /result[num_cons*i+8];
 			grad[(num_cons*i+8)*n+1]=-grad[(num_cons*i+8)*n+1]/result[num_cons*i+8];
 			grad[(num_cons*i+8)*n+2]=-grad[(num_cons*i+8)*n+2]/result[num_cons*i+8];
-			// grad[(num_cons*i+8)*n+3]=-grad[(num_cons*i+8)*n+3]/result[num_cons*i+8];
-			// grad[(num_cons*i+8)*n+4]=-grad[(num_cons*i+8)*n+4]/result[num_cons*i+8];
+			grad[(num_cons*i+8)*n+3]=-grad[(num_cons*i+8)*n+3]/result[num_cons*i+8];
+			grad[(num_cons*i+8)*n+4]=-grad[(num_cons*i+8)*n+4]/result[num_cons*i+8];
 		}
 
 		result[num_cons*i+8]=1.0/double(bez_beta)*log(result[num_cons*i+8])+bez_min_dist;
@@ -474,13 +474,11 @@ double geo_objective(unsigned n, const double *x, double *grad, void *my_func_da
 		double px2=6*pow(1-t,2)*pow(t,2);
 		double px3=4*(1-t)*pow(t,3);
 		double py3=px3;
-		double px4=pow(t,4);
-		double py4=px4;
 		for(int j=0;j<cols-num_param_pairs;j++){
 			double dist2= pow(bez_curv[i][0]-xopt[0][j+num_param_pairs],2)+pow(bez_curv[i][1]-xopt[1][j+num_param_pairs],2); //Squared distance
 			
 			funcreturn=funcreturn+(1/dist2)*exp(-bez_alpha*dist2); //Sum of reciprocal squared distances, exponentially decaying weight
-			//Next, find grad for each of five variables
+			//Next, find grad for each of three variables
 			if(grad){
 	/* x2 */ 	grad[0]=grad[0]-1*2*(bez_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px2;
 	/* x3 */ 	grad[1]=grad[1]-1*2*(bez_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px3;
@@ -557,9 +555,9 @@ void geo_inequality_con(unsigned m, double *result, unsigned n, const double* x,
 			result[num_geo_cons*i]=result[num_geo_cons*i]+exp(-1.0*double(bez_beta)*dist1);
 
 			if(grad){
-		/*x2*/	grad[(num_geo_cons*i)*n]=grad[(num_geo_cons*i)*n]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+7])/dist1*px2;
-		/*x3*/	grad[(num_geo_cons*i)*n+1]=grad[(num_geo_cons*i)*n+1]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+7])/dist1*px3;
-		/*y3*/	grad[(num_geo_cons*i)*n+2]=grad[(num_geo_cons*i)*n+2]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+7])/dist1*py3;
+		/*x2*/	grad[(num_geo_cons*i)*n]=grad[(num_geo_cons*i)*n]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px2;
+		/*x3*/	grad[(num_geo_cons*i)*n+1]=grad[(num_geo_cons*i)*n+1]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px3;
+		/*y3*/	grad[(num_geo_cons*i)*n+2]=grad[(num_geo_cons*i)*n+2]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+num_param_pairs])/dist1*py3;
 			}
 		}
 		if(grad){
@@ -2272,7 +2270,7 @@ class GapBarrier
 				std::vector<double> wc = {0.0, 0.0};
 				double mapped_x=locx, mapped_y=locy, mapped_theta=loctheta;
 
-				int num_fixed = 4;	// Number of bezier curve points that are fully or partially fixed
+				int num_fixed = 3;	// Number of bezier curve points that are fully or partially fixed
 
 				for (int num_MPC=0;num_MPC<bez_ctrl_pts-num_fixed;num_MPC++){
 					std::vector<float> fused_ranges_MPC_tot=fused_ranges_MPC;
@@ -2726,19 +2724,19 @@ class GapBarrier
 
 				// Perform first proposed optimization for geometry only
 				nlopt_opt newopt;
-				int num_fixed_pts = num_fixed*2-1; // First point, last point and last point
+				int num_fixed_pts = 4*2-1; // First point, last point and last point
 				newopt = nlopt_create(NLOPT_LD_SLSQP, bez_ctrl_pts*2-num_fixed_pts); /* algorithm and dimensionality */
 				//[0] -> x2
 				//[1] -> x3
 				//[2] -> y3
 
 				for (int i=0;i<bez_ctrl_pts*2-num_fixed_pts;i++){
-					nlopt_set_lower_bound(newopt, i, -max_lidar_range); //Bounds on max and min control point coordinates
-					// if(i == 2){nlopt_set_lower_bound(newopt, i, -max_lidar_range);}
+					nlopt_set_lower_bound(newopt, i, 0); //Bounds on max and min control point coordinates
+					if(i == 2){nlopt_set_lower_bound(newopt, i, -max_lidar_range);}	// Only set minimum of 0 for x, not y to enforce forward points
 					nlopt_set_upper_bound(newopt, i, max_lidar_range);
 				}
 
-				double geo_x1=std::max(vel_adapt,min_speed)/4*bez_t_end; //Set the fixed point values here
+				double geo_x1= std::max(vel_adapt,min_speed)/4*bez_t_end; //Set the fixed point values here
 				double geo_y2=4.0/3.0*pow(geo_x1,2)*tan(last_delta)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
 				double geo_x4=max_jump_point[0];
 				double geo_y4=max_jump_point[1];
@@ -2846,19 +2844,19 @@ class GapBarrier
 				double bez_y2=4.0/3.0*pow(bez_x1,2)*tan(last_delta)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
 				// double bez_x4=(obstacle_points_l[0][0] + obstacle_points_r[obstacle_points_r.size()-1][0]) / 2;
 				// double bez_y4=(obstacle_points_l[0][1] + obstacle_points_r[obstacle_points_r.size()-1][1]) / 2;
-				double bez_x4=max_jump_point[0];
-				double bez_y4=max_jump_point[1];
+				// double bez_x4=max_jump_point[0];
+				// double bez_y4=max_jump_point[1];
 
-				// std::vector<double> opt_params1;
-				// std::vector<double> opt_params2;
+				opt_params1.clear();
+				opt_params2.clear();
 
 				num_param_pairs_1 = 9;
-				num_param_pairs_2 = 8;
+				num_param_pairs_2 = 7;
 				
 				opt_params1.push_back(num_obs+num_param_pairs_1); opt_params1.push_back(bez_ctrl_pts); 
 				opt_params1.push_back(bez_curv_pts); opt_params1.push_back(bez_alpha); 
 				opt_params1.push_back(bez_x1); opt_params1.push_back(bez_y2);
-				opt_params1.push_back(bez_x4); opt_params1.push_back(bez_y4); 
+				opt_params1.push_back(99); opt_params1.push_back(99); // Filler for now
 				opt_params1.push_back(pot_field_factor_F_QBMPC); opt_params1.push_back(velocity_factor_F_QBMPC);
 				opt_params1.push_back(geo_x1); opt_params1.push_back(geo_x[0]);
 				opt_params1.push_back(geo_y2); opt_params1.push_back(geo_x[1]);
@@ -2870,7 +2868,7 @@ class GapBarrier
 				opt_params2.push_back(bez_t_end); opt_params2.push_back(wheelbase); opt_params2.push_back(bez_min_dist); 
 				// opt_params2.push_back(theta_band_smooth); opt_params2.push_back(theta_band_diff);
 				// opt_params2.push_back(vel_beta); opt_params2.push_back(stop_dist_decay); 
-				opt_params2.push_back(bez_x4); opt_params2.push_back(bez_y4);
+				// opt_params2.push_back(bez_x4); opt_params2.push_back(bez_y4);
 
 				for (int i=0; i<num_obs;i++){ //Add all subsampled obstacles to the parameters
 					opt_params1.push_back(sub_bez_obs[i][0]);
@@ -2892,14 +2890,15 @@ class GapBarrier
 				init_guess[0]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
 				init_guess[1]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]),max_lidar_range-1e-6); //x3
 				init_guess[2]=std::min(std::max(-max_lidar_range+1e-6,yptplot[0]),max_lidar_range-1e-6); //y3
-
+				init_guess[3]=std::min(std::max(-max_lidar_range+1e-6,xptplot[1]),max_lidar_range-1e-6); //x4
+				init_guess[4]=std::min(std::max(-max_lidar_range+1e-6,yptplot[1]),max_lidar_range-1e-6); //y4
 				double x[bez_ctrl_pts*2-num_fixed_pts];  /* `*`some` `initial` `guess`*` */
 				//Try new attempt at initial guess
 				x[0]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
 				x[1]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]),max_lidar_range-1e-6); //x3
 				x[2]=std::min(std::max(-max_lidar_range+1e-6,yptplot[0]),max_lidar_range-1e-6); //y3
-				// x[3]=std::min(std::max(-max_lidar_range+1e-6,xptplot[1]),max_lidar_range-1e-6); //x4
-				// x[4]=std::min(std::max(-max_lidar_range+1e-6,yptplot[1]),max_lidar_range-1e-6); //y4
+				x[3]=std::min(std::max(-max_lidar_range+1e-6,xptplot[1]),max_lidar_range-1e-6); //x4
+				x[4]=std::min(std::max(-max_lidar_range+1e-6,yptplot[1]),max_lidar_range-1e-6); //y4
 
 				successful_opt=0;
 
@@ -2914,8 +2913,8 @@ class GapBarrier
 				double bez_x2=0;
 				double bez_x3=0;
 				double bez_y3=0;
-				// double bez_x4=0;
-				// double bez_y4=0;
+				double bez_x4=0;
+				double bez_y4=0;
 
 				if(isnan(minf)){
 					forcestop=1;
@@ -2937,8 +2936,8 @@ class GapBarrier
 					bez_x2=x[0];
 					bez_x3=x[1];
 					bez_y3=x[2];
-					// bez_x4=x[3];
-					// bez_y4=x[4];
+					bez_x4=x[3];
+					bez_y4=x[4];
 
 					// FILE *file1wq = fopen("/home/gjsk/1_opt_time.txt", "a");
 					// fprintf(file1wq,"%lf\n",opt_time2-opt_time1);

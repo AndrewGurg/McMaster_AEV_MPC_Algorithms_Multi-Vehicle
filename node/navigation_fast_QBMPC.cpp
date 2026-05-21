@@ -167,9 +167,9 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 			if(grad){
 	/* x2 */ 	grad[0]=grad[0]-potfield_factor*2*(bez_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px2;
 	/* x3 */ 	grad[1]=grad[1]-potfield_factor*2*(bez_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px3;
+	/* y3 */ 	grad[2]=grad[2]-potfield_factor*2*(bez_curv[i][1]-xopt[1][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py3;
 	/* x4 */ 	grad[3]=grad[3]-potfield_factor*2*(bez_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px4;
 	/* y4 */ 	grad[4]=grad[4]-potfield_factor*2*(bez_curv[i][1]-xopt[1][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py4;
-	/* y3 */ 	grad[2]=grad[2]-potfield_factor*2*(bez_curv[i][1]-xopt[1][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py3;
 			}
 		}
 		
@@ -193,14 +193,14 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 		
 	}
 
-	// Additional objective term favoring bezier curve final point proximity to lookahead point
-	double dist = sqrt(pow(max_jump_x - x[3],2)+pow(max_jump_y-x[4],2));
-	funcreturn = funcreturn + (vel_factor*dist);// Sum of reciprocal squared velocities 
-	if(grad){
-	// M_x2,x3,y3 = 0
-	/*M_x4*/	grad[3]=grad[3]+(vel_factor/dist)*(x[3]-max_jump_x);
-	/*M_y4*/	grad[4]=grad[4]+(vel_factor/dist)*(x[4]-max_jump_y);
-	}
+	// // Additional objective term favoring bezier curve final point proximity to lookahead point
+	// double dist = sqrt(pow(max_jump_x - x[3],2)+pow(max_jump_y-x[4],2));
+	// funcreturn = funcreturn + (vel_factor*dist);// Sum of reciprocal squared velocities 
+	// if(grad){
+	// // M_x2,x3,y3 = 0
+	// /*M_x4*/	grad[3]=grad[3]+(vel_factor/dist)*(x[3]-max_jump_x);
+	// /*M_y4*/	grad[4]=grad[4]+(vel_factor/dist)*(x[4]-max_jump_y);
+	// }
 
 	return funcreturn;
 }
@@ -389,15 +389,15 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 		}
 		if(grad){
 			double myval=grad[(num_cons*i+8)*n];
-			grad[(num_cons*i+8)*n]=-grad[(num_cons*i+8)*n]/result[9*i+8];
-			grad[(num_cons*i+8)*n+1]=-grad[(num_cons*i+8)*n+1]/result[9*i+8];
-			grad[(num_cons*i+8)*n+2]=-grad[(num_cons*i+8)*n+2]/result[9*i+8];
-			grad[(num_cons*i+8)*n+3]=-grad[(num_cons*i+8)*n+3]/result[9*i+8];
-			grad[(num_cons*i+8)*n+4]=-grad[(num_cons*i+8)*n+4]/result[9*i+8];
+			grad[(num_cons*i+8)*n]=-grad[(num_cons*i+8)*n]/result[num_cons*i+8];
+			grad[(num_cons*i+8)*n+1]=-grad[(num_cons*i+8)*n+1]/result[num_cons*i+8];
+			grad[(num_cons*i+8)*n+2]=-grad[(num_cons*i+8)*n+2]/result[num_cons*i+8];
+			grad[(num_cons*i+8)*n+3]=-grad[(num_cons*i+8)*n+3]/result[num_cons*i+8];
+			grad[(num_cons*i+8)*n+4]=-grad[(num_cons*i+8)*n+4]/result[num_cons*i+8];
 		}
 
 		double myval=result[9*i+8];
-		result[9*i+8]=1.0/double(bez_beta)*log(result[9*i+8])+bez_min_dist;
+		result[num_cons*i+8]=1.0/double(bez_beta)*log(result[num_cons*i+8])+bez_min_dist;
 
 		// ADDED BEYOND THIS POINT //
 	
