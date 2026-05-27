@@ -173,21 +173,21 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 			}
 		}
 		
-		// Variables used in velocity term and gradients
-		double x_dot=4*x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
-		double y_dot=6*y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
-		double pdx2=6*(4*pow(t,3)-6*pow(t,2)+2*t);double pdx3=4*(-4*pow(t,3)+3*pow(t,2));double pdy3=pdx3;double pdx4=4*pow(t,3);double pdy4=pdx4; //X_dot & y_dot
+		// // Variables used in velocity term and gradients
+		// double x_dot=4*x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
+		// double y_dot=6*y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
+		// double pdx2=6*(4*pow(t,3)-6*pow(t,2)+2*t);double pdx3=4*(-4*pow(t,3)+3*pow(t,2));double pdy3=pdx3;double pdx4=4*pow(t,3);double pdy4=pdx4; //X_dot & y_dot
 		
-		// Additional objective term favoring high velocities
-		double vel2 = pow(x_dot,2)+pow(y_dot,2);
-		funcreturn=funcreturn + (10/vel2);// Sum of reciprocal squared velocities 
-		if(grad){
-		/*M_x2*/	grad[0]=grad[0]-(vel_factor/pow(vel2,2))*2*x_dot*pdx2;
-		/*M_x3*/	grad[1]=grad[1]-(vel_factor/pow(vel2,2))*2*x_dot*pdx3;
-		/*M_y3*/	grad[2]=grad[2]-(vel_factor/pow(vel2,2))*2*y_dot*pdy3;
-		/*M_x4*/	grad[3]=grad[3]-(vel_factor/pow(vel2,2))*2*x_dot*pdx4;
-		/*M_y4*/	grad[4]=grad[4]-(vel_factor/pow(vel2,2))*2*y_dot*pdy4;
-		}		
+		// // Additional objective term favoring high velocities
+		// double vel2 = pow(x_dot,2)+pow(y_dot,2);
+		// funcreturn=funcreturn + (10/vel2);// Sum of reciprocal squared velocities 
+		// if(grad){
+		// /*M_x2*/	grad[0]=grad[0]-(vel_factor/pow(vel2,2))*2*x_dot*pdx2;
+		// /*M_x3*/	grad[1]=grad[1]-(vel_factor/pow(vel2,2))*2*x_dot*pdx3;
+		// /*M_y3*/	grad[2]=grad[2]-(vel_factor/pow(vel2,2))*2*y_dot*pdy3;
+		// /*M_x4*/	grad[3]=grad[3]-(vel_factor/pow(vel2,2))*2*x_dot*pdx4;
+		// /*M_y4*/	grad[4]=grad[4]-(vel_factor/pow(vel2,2))*2*y_dot*pdy4;
+		// }		
 
 				
 		
@@ -1930,54 +1930,102 @@ class GapBarrier
 
 
 		double find_best_point_MPC(int start_i, int end_i, std::vector<float> proc_ranges, std::vector<double> lidar_transform_angles){
-			double jump = 0;
+			int jump_idx = 0;
 			std::vector<float> ranges = proc_ranges;
-			// Finds jumps in scan data, then extends the nearby wall to accomodate vehicle width
-			for(int i =start_i; i < end_i; ++i){
-				// Get jump between this index and next
-				jump = std::abs(ranges[i]-ranges[i+1]);
-				// Check the length of the jump
-				if (jump > veh_det_width){
-					double close_pt = (ranges[i] < ranges[i+1]) ? ranges[i] : ranges[i+1];
-					// Find angle needed to accomodate half vehicle width
-					double angle = (veh_det_width/close_pt)/2;
-					// Extend close width on either side of this jump 
-					bool in_angle = false;
-					int offset = 1;
-					// Left side first
-					while(!in_angle){
-						// Make sure offset point is still valid
-						if(i-offset >= start_i && i-offset >= 0){
-							// Only change larger ranges
-							if(ranges[i-offset] > close_pt){
-								proc_ranges[i-offset] = close_pt;
-							}
-							// Exit if the total angle is larger than the required angle
-							if(std::abs(lidar_transform_angles[i]-lidar_transform_angles[i-offset]) > angle){
-								in_angle = true; 
-							}
+			// Finds the max jump in the scan data
+			jump_idx = find_max_jump(ranges, lidar_transform_angles);
+
+			if (jump_idx != -1){
+
+				// Get the closer point
+				int i = jump_idx;
+				double close_pt = (ranges[i] < ranges[i+1]) ? ranges[i] : ranges[i+1];
+				// Find angle needed to accomodate half vehicle width
+				double angle = (veh_det_width/close_pt)/2;
+				// Extend close width on either side of this jump 
+				bool in_angle = false;
+				int offset = 1;
+				// Left side first
+				while(!in_angle){
+					// Make sure offset point is still valid
+					if(i-offset >= start_i && i-offset >= 0){
+						// Only change larger ranges
+						if(ranges[i-offset] > close_pt){
+							proc_ranges[i-offset] = close_pt;
 						}
-						else{break;}
-						offset++;
-					} 
-					// Then right side
-					in_angle = false;
-					offset = 1;
-					while(!in_angle){
-						if(i+offset < end_i && i+offset < ranges.size()){
-							if(ranges[i+offset] > close_pt){
-								proc_ranges[i+offset] = close_pt;
-							}
-							// Exit if the total angle is larger than the required angle
-							if(std::abs(lidar_transform_angles[i]-lidar_transform_angles[i+offset]) > angle){
-								in_angle = true; 
-							}
+						// Exit if the total angle is larger than the required angle
+						if(std::abs(lidar_transform_angles[i]-lidar_transform_angles[i-offset]) > angle){
+							in_angle = true; 
 						}
-						else{break;}
-						offset++;
-					} 
-				}
+					}
+					else{break;}
+					offset++;
+				} 
+				// Then right side
+				in_angle = false;
+				offset = 1;
+				while(!in_angle){
+					if(i+offset < end_i && i+offset < ranges.size()){
+						if(ranges[i+offset] > close_pt){
+							proc_ranges[i+offset] = close_pt;
+						}
+						// Exit if the total angle is larger than the required angle
+						if(std::abs(lidar_transform_angles[i]-lidar_transform_angles[i+offset]) > angle){
+							in_angle = true; 
+						}
+					}
+					else{break;}
+					offset++;
+				} 
 			}
+			
+			// double jump;
+			// // Finds jumps in scan data, then extends the nearby wall to accomodate vehicle width
+			// for(int i =start_i; i < end_i; ++i){
+			// 	// Get jump between this index and next
+			// 	jump = std::abs(ranges[i]-ranges[i+1]);
+			// 	// Check the length of the jump
+			// 	if (jump > 2*veh_det_width){
+			// 		double close_pt = (ranges[i] < ranges[i+1]) ? ranges[i] : ranges[i+1];
+			// 		// Find angle needed to accomodate half vehicle width
+			// 		double angle = (veh_det_width/close_pt)/2;
+			// 		// Extend close width on either side of this jump 
+			// 		bool in_angle = false;
+			// 		int offset = 1;
+			// 		// Left side first
+			// 		while(!in_angle){
+			// 			// Make sure offset point is still valid
+			// 			if(i-offset >= start_i && i-offset >= 0){
+			// 				// Only change larger ranges
+			// 				if(ranges[i-offset] > close_pt){
+			// 					proc_ranges[i-offset] = close_pt;
+			// 				}
+			// 				// Exit if the total angle is larger than the required angle
+			// 				if(std::abs(lidar_transform_angles[i]-lidar_transform_angles[i-offset]) > angle){
+			// 					in_angle = true; 
+			// 				}
+			// 			}
+			// 			else{break;}
+			// 			offset++;
+			// 		} 
+			// 		// Then right side
+			// 		in_angle = false;
+			// 		offset = 1;
+			// 		while(!in_angle){
+			// 			if(i+offset < end_i && i+offset < ranges.size()){
+			// 				if(ranges[i+offset] > close_pt){
+			// 					proc_ranges[i+offset] = close_pt;
+			// 				}
+			// 				// Exit if the total angle is larger than the required angle
+			// 				if(std::abs(lidar_transform_angles[i]-lidar_transform_angles[i+offset]) > angle){
+			// 					in_angle = true; 
+			// 				}
+			// 			}
+			// 			else{break;}
+			// 			offset++;
+			// 		} 
+			// 	}
+			// }
 
 			double best_heading = 0;
 			double max_range = 0; 
@@ -1988,7 +2036,7 @@ class GapBarrier
 					best_heading = lidar_transform_angles[i];
 				}
 			}
-
+			
 			// best_heading=(lidar_transform_angles[start_i]+lidar_transform_angles[end_i])/2;
 
 			return best_heading; 
@@ -2053,7 +2101,7 @@ class GapBarrier
 			}
 
 			// Jump is to small
-			if (max_jump < veh_det_width){
+			if (max_jump < 2*veh_det_width){
 				return -1; 
 			}
 			// Return center point in the middle of the jump
@@ -2339,7 +2387,7 @@ class GapBarrier
 
 				std::vector<std::vector<double>> obstacle_points_l;
 				std::vector<std::vector<double>> obstacle_points_r;
-				int str_indx, end_indx;
+				int str_indx_1, end_indx_1, str_indx_2, end_indx_2;
 				double heading_angle;
 
 				std::vector<double> lidar_transform_angles;
@@ -2507,36 +2555,49 @@ class GapBarrier
 					
 					if(heading_angle_MPC==5 || num_MPC==0){ //Use the other method to find the heading angle (if gap is large enough, use this prior value)
 						if(num_MPC > 0){
+
+
+							str_indx_MPC = right_ind_MPC; end_indx_MPC = left_ind_MPC;
+							heading_angle_MPC= find_best_point_MPC(str_indx_MPC, end_indx_MPC, proc_ranges_MPC,lidar_transform_angles_tot);
+							
+							// std::pair<int,int> max_gap_MPC = find_max_gap_MPC(proc_ranges_MPC,lidar_transform_angles_tot);
+							// str_indx_MPC = max_gap_MPC.first; end_indx_MPC = max_gap_MPC.second;
+							// heading_angle_MPC = (lidar_transform_angles_tot[str_indx_MPC]+lidar_transform_angles_tot[end_indx_MPC])/2;
+
+							str_indx_2 = str_indx_MPC;
+							end_indx_2 = end_indx_MPC;
+						}
+						else{
+							// std::pair<int,int> max_far_gap = find_max_far_gap(proc_ranges_MPC, lidar_transform_angles_tot);
+							// str_indx_MPC = max_far_gap.first; end_indx_MPC = max_far_gap.second;
+							// No far gap found, use lookahead point
+							// if (str_indx_MPC == -1 && end_indx_MPC == -1){
+							// 	int max_jump_idx = find_max_jump(proc_ranges_MPC,lidar_transform_angles_tot);
+							// 	// No jump point found, send forward as heading for now
+							// 	if (max_jump_idx == -1){ 
+							// 		heading_angle_MPC = 0; }
+							// 	else{ 
+							// 		str_indx_MPC = max_jump_idx;
+							// 		end_indx_MPC = max_jump_idx + 1;
+							// 		heading_angle_MPC= find_best_point_MPC(str_indx_MPC, end_indx_MPC, proc_ranges_MPC,lidar_transform_angles_tot); 
+							// 	}
+							// }
+							// else{ heading_angle_MPC= find_best_point_MPC(str_indx_MPC, end_indx_MPC, proc_ranges_MPC,lidar_transform_angles_tot);}
+
+							// heading_angle_MPC= find_best_point_MPC(str_indx_MPC, end_indx_MPC, proc_ranges_MPC,lidar_transform_angles_tot);
+
+
 							std::pair<int,int> max_gap_MPC = find_max_gap_MPC(proc_ranges_MPC,lidar_transform_angles_tot);
 							str_indx_MPC = max_gap_MPC.first; end_indx_MPC = max_gap_MPC.second;
 							heading_angle_MPC = (lidar_transform_angles_tot[str_indx_MPC]+lidar_transform_angles_tot[end_indx_MPC])/2;
 
-						}
-						else{
-						// std::pair<int,int> max_far_gap = find_max_far_gap(proc_ranges_MPC, lidar_transform_angles_tot);
-						// str_indx_MPC = max_far_gap.first; end_indx_MPC = max_far_gap.second;
-						// No far gap found, use lookahead point
-						// if (str_indx_MPC == -1 && end_indx_MPC == -1){
-						// 	int max_jump_idx = find_max_jump(proc_ranges_MPC,lidar_transform_angles_tot);
-						// 	// No jump point found, send forward as heading for now
-						// 	if (max_jump_idx == -1){ 
-						// 		heading_angle_MPC = 0; }
-						// 	else{ 
-						// 		str_indx_MPC = max_jump_idx;
-						// 		end_indx_MPC = max_jump_idx + 1;
-						// 		heading_angle_MPC= find_best_point_MPC(str_indx_MPC, end_indx_MPC, proc_ranges_MPC,lidar_transform_angles_tot); 
-						// 	}
-						// }
-						// else{ heading_angle_MPC= find_best_point_MPC(str_indx_MPC, end_indx_MPC, proc_ranges_MPC,lidar_transform_angles_tot);}
+							// str_indx_MPC = right_ind_MPC; end_indx_MPC = left_ind_MPC;
+							// heading_angle_MPC= find_best_point_MPC(str_indx_MPC, end_indx_MPC, proc_ranges_MPC,lidar_transform_angles_tot);
 
-						// heading_angle_MPC= find_best_point_MPC(str_indx_MPC, end_indx_MPC, proc_ranges_MPC,lidar_transform_angles_tot);
-							str_indx_MPC = right_ind_MPC; end_indx_MPC = left_ind_MPC;
-							heading_angle_MPC= find_best_point_MPC(str_indx_MPC, end_indx_MPC, proc_ranges_MPC,lidar_transform_angles_tot);
-							
+							str_indx_1 = str_indx_MPC;
+							end_indx_1 = end_indx_MPC;
 						}
 
-						str_indx = str_indx_MPC;
-						end_indx = end_indx_MPC;
 						heading_angle = heading_angle_MPC;
 
 						if(num_MPC==0){
@@ -3159,14 +3220,34 @@ class GapBarrier
 
 				// p6.x = obstacle_points_r[obstacle_points_r.size()-1][0];	p6.y = obstacle_points_r[obstacle_points_r.size()-1][1];	p6.z = 0;
 				// scan_gap_marker.points.push_back(p6); 	// Last point in right obstacles
-				std::vector<double> gap_start = {fused_ranges_MPC_tot0[str_indx]*cos(lidar_transform_angles_tot0[str_indx]), fused_ranges_MPC_tot0[str_indx]*sin(lidar_transform_angles_tot0[str_indx])};
-				std::vector<double> gap_end   = {fused_ranges_MPC_tot0[end_indx]*cos(lidar_transform_angles_tot0[end_indx]), fused_ranges_MPC_tot0[end_indx]*sin(lidar_transform_angles_tot0[end_indx])};
+				std::vector<double> gap_start_1 = {fused_ranges_MPC_tot0[str_indx_1]*cos(lidar_transform_angles_tot0[str_indx_1]), fused_ranges_MPC_tot0[str_indx_1]*sin(lidar_transform_angles_tot0[str_indx_1])};
+				std::vector<double> gap_end_1   = {fused_ranges_MPC_tot0[end_indx_1]*cos(lidar_transform_angles_tot0[end_indx_1]), fused_ranges_MPC_tot0[end_indx_1]*sin(lidar_transform_angles_tot0[end_indx_1])};
 
-				p6.x = gap_start[0];	p6.y = gap_start[1];	p6.z = 0;
+				std::vector<double> gap_start_2 = {fused_ranges_MPC_tot0[str_indx_2]*cos(lidar_transform_angles_tot0[str_indx_2]), fused_ranges_MPC_tot0[str_indx_2]*sin(lidar_transform_angles_tot0[str_indx_2])};
+				std::vector<double> gap_end_2   = {fused_ranges_MPC_tot0[end_indx_2]*cos(lidar_transform_angles_tot0[end_indx_2]), fused_ranges_MPC_tot0[end_indx_2]*sin(lidar_transform_angles_tot0[end_indx_2])};
+				p6.x = gap_start_1[0];	p6.y = gap_start_1[1];	p6.z = 0;
 				scan_gap_marker.points.push_back(p6); 	
 
-				p6.x = gap_end[0];	p6.y = gap_end[1];	p6.z = 0;
-				scan_gap_marker.points.push_back(p6); 	// Last point in right obstacles
+				p6.x = gap_end_1[0];	p6.y = gap_end_1[1];	p6.z = 0;
+				scan_gap_marker.points.push_back(p6); 	
+
+				p6.x = gap_start_2[0];	p6.y = gap_start_2[1];	p6.z = 0;
+				scan_gap_marker.points.push_back(p6); 	
+
+				p6.x = gap_end_2[0];	p6.y = gap_end_2[1];	p6.z = 0;
+				scan_gap_marker.points.push_back(p6); 	
+
+				// Theta refs
+				p6.x = 0; p6.y = 0; p6.z = 0;
+				scan_gap_marker.points.push_back(p6); 
+				p6.x = 1.5*cos(theta_refs[0]); p6.y = 1.5*sin(theta_refs[0]); p6.z = 0;
+				scan_gap_marker.points.push_back(p6); 
+
+				p6.x = xptplot[0]; p6.y = yptplot[0]; p6.z = 0;
+				scan_gap_marker.points.push_back(p6); 
+				p6.x = 1.5*cos(theta_refs[1]) + xptplot[0]; p6.y = 1.5*sin(theta_refs[1]) + yptplot[0]; p6.z = 0;
+				scan_gap_marker.points.push_back(p6); 
+
 
 				scan_gap.publish(scan_gap_marker);
 
