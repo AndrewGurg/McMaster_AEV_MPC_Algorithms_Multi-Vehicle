@@ -130,13 +130,13 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 	double potfield_factor=xopt[0][4];
 	double vel_factor=xopt[1][4];
 	double gx1=xopt[0][5]; 
-	double gx2=xopt[1][5];
-	double gy2=xopt[0][6]; 
-	double gx3=xopt[1][6];
-	double gy3=xopt[0][7];
-	double gx4=xopt[1][7];
-	double gy4=xopt[0][8];
-	double filler=xopt[1][8];  
+	double gy1=xopt[1][5];
+	double gx2=xopt[0][6]; 
+	double gy2=xopt[1][6];
+	double gx3=xopt[0][7];
+	double gy3=xopt[1][7];
+	double gx4=xopt[0][8];
+	double gy4=xopt[1][8];  
 	int num_param_pairs = 9;
 	std::vector<std::vector<double>> bez_curv;
 	std::vector<std::vector<double>> geo_curv;
@@ -157,7 +157,7 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 	for(int i=0; i<bez_curv_pts; i++){
 		double t=double(i)/double(bez_curv_pts-1);
 		double geo_x=4*pow(1-t,3)*t*gx1+6*pow(1-t,2)*pow(t,2)*gx2+4*(1-t)*pow(t,3)*gx3+pow(t,4)*gx4;
-		double geo_y=6*pow(1-t,2)*pow(t,2)*gy2+4*(1-t)*pow(t,3)*gy3+pow(t,4)*gy4; //y1=0
+		double geo_y=4*pow(1-t,3)*t*gy1+6*pow(1-t,2)*pow(t,2)*gy2+4*(1-t)*pow(t,3)*gy3+pow(t,4)*gy4; 
 		geo_curv.push_back({geo_x,geo_y});
 	}
 
@@ -205,21 +205,21 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 			}
 		}
 		
-		// Variables used in velocity term and gradients
-		double x_dot=4*x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
-		double y_dot=6*y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
-		double pdx2=6*(4*pow(t,3)-6*pow(t,2)+2*t);double pdx3=4*(-4*pow(t,3)+3*pow(t,2));double pdy3=pdx3;double pdx4=4*pow(t,3);double pdy4=pdx4; //X_dot & y_dot
+		// // Variables used in velocity term and gradients
+		// double x_dot=4*x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
+		// double y_dot=6*y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
+		// double pdx2=6*(4*pow(t,3)-6*pow(t,2)+2*t);double pdx3=4*(-4*pow(t,3)+3*pow(t,2));double pdy3=pdx3;double pdx4=4*pow(t,3);double pdy4=pdx4; //X_dot & y_dot
 		
-		// Additional objective term favoring high velocities
-		double vel2 = pow(x_dot,2)+pow(y_dot,2);
-		funcreturn=funcreturn + (vel_factor/vel2);// Sum of reciprocal squared velocities 
-		if(grad){
-		/*M_x2*/	grad[0]=grad[0]-(vel_factor/pow(vel2,2))*2*x_dot*pdx2;
-		/*M_x3*/	grad[1]=grad[1]-(vel_factor/pow(vel2,2))*2*x_dot*pdx3;
-		/*M_y3*/	grad[2]=grad[2]-(vel_factor/pow(vel2,2))*2*y_dot*pdy3;
-		/*M_x4*/	grad[3]=grad[3]-(vel_factor/pow(vel2,2))*2*x_dot*pdx4;
-		/*M_y4*/	grad[4]=grad[4]-(vel_factor/pow(vel2,2))*2*y_dot*pdy4;
-		}		
+		// // Additional objective term favoring high velocities
+		// double vel2 = pow(x_dot,2)+pow(y_dot,2);
+		// funcreturn=funcreturn + (vel_factor/vel2);// Sum of reciprocal squared velocities 
+		// if(grad){
+		// /*M_x2*/	grad[0]=grad[0]-(vel_factor/pow(vel2,2))*2*x_dot*pdx2;
+		// /*M_x3*/	grad[1]=grad[1]-(vel_factor/pow(vel2,2))*2*x_dot*pdx3;
+		// /*M_y3*/	grad[2]=grad[2]-(vel_factor/pow(vel2,2))*2*y_dot*pdy3;
+		// /*M_x4*/	grad[3]=grad[3]-(vel_factor/pow(vel2,2))*2*x_dot*pdx4;
+		// /*M_y4*/	grad[4]=grad[4]-(vel_factor/pow(vel2,2))*2*y_dot*pdy4;
+		// }		
 		
 	}
 
@@ -239,7 +239,7 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 
 	//int bez_ctrl_pts=xopt[1][0]; //Order of the Bezier Curve
 	int bez_curv_pts=xopt[0][1]; //Discretized points on our curve
-	int bez_beta=xopt[1][1]; //Large value to use softmin function which is differentiable (different from alpha used in myfunc)
+	double bez_beta=xopt[1][1]; //Large value to use softmin function which is differentiable (different from alpha used in myfunc)
 	double x1=xopt[0][2]; //These are fixed by initial conditions and thus aren't variables in optimization
 	double y2=xopt[1][2];
 	double max_v=xopt[0][3]; //Highest allowed velocity
@@ -439,12 +439,10 @@ double geo_objective(unsigned n, const double *x, double *grad, void *my_func_da
 	//int bez_ctrl_pts=xopt[1][0]; //Order of the Bezier Curve
 	int bez_curv_pts=xopt[0][1]; //Discretized points on our curve
 	double bez_alpha=xopt[1][1]; //Shaping of the exponential decay for further points
-	double x1=xopt[0][2]; //These are fixed by initial conditions and thus aren't variables in optimization
-	double y2=xopt[1][2];
-	double x4=xopt[0][3];
-	double y4=xopt[1][3];
-	int num_param_pairs = 4;
-	std::vector<std::vector<double>> bez_curv;
+	double x4=xopt[0][2];//These are fixed by initial conditions and thus aren't variables in optimization
+	double y4=xopt[1][2];
+	int num_param_pairs = 3;
+	std::vector<std::vector<double>> geo_curv;
 	//Optimization variables:
 	//[0] -> x1
 	//[1] -> y1
@@ -454,12 +452,12 @@ double geo_objective(unsigned n, const double *x, double *grad, void *my_func_da
 	//[5] -> y3
 
 
-	//Create the discretized Bezier Curve
+	//Create the discretized Geometric Curve
 	for(int i=0; i<bez_curv_pts; i++){
 		double t=double(i)/double(bez_curv_pts-1);
-		double bez_x=4*pow(1-t,3)*t*x1+6*pow(1-t,2)*pow(t,2)*x[0]+4*(1-t)*pow(t,3)*x[1]+pow(t,4)*x4;
-		double bez_y=6*pow(1-t,2)*pow(t,2)*y2+4*(1-t)*pow(t,3)*x[2]+pow(t,4)*y4; //y1=0
-		bez_curv.push_back({bez_x,bez_y});
+		double geo_x=4*pow(1-t,3)*t*x[0]+6*pow(1-t,2)*pow(t,2)*x[2]+4*(1-t)*pow(t,3)*x[4]+pow(t,4)*x4;
+		double geo_y=4*pow(1-t,3)*t*x[1]+6*pow(1-t,2)*pow(t,2)*x[3]+4*(1-t)*pow(t,3)*x[5]+pow(t,4)*y4;
+		geo_curv.push_back({geo_x,geo_y});
 	}
 
 	double funcreturn=0.0;
@@ -471,18 +469,24 @@ double geo_objective(unsigned n, const double *x, double *grad, void *my_func_da
 
 	for(int i=0;i<bez_curv_pts;i++){
 		double t=double(i)/double(bez_curv_pts-1);
+		double px1=4*pow(1-t,3)*t;
+		double py1=px1;
 		double px2=6*pow(1-t,2)*pow(t,2);
+		double py2=px2;
 		double px3=4*(1-t)*pow(t,3);
 		double py3=px3;
 		for(int j=0;j<cols-num_param_pairs;j++){
-			double dist2= pow(bez_curv[i][0]-xopt[0][j+num_param_pairs],2)+pow(bez_curv[i][1]-xopt[1][j+num_param_pairs],2); //Squared distance
+			double dist2= pow(geo_curv[i][0]-xopt[0][j+num_param_pairs],2)+pow(geo_curv[i][1]-xopt[1][j+num_param_pairs],2); //Squared distance
 			
 			funcreturn=funcreturn+(1/dist2)*exp(-bez_alpha*dist2); //Sum of reciprocal squared distances, exponentially decaying weight
 			//Next, find grad for each of three variables
 			if(grad){
-	/* x2 */ 	grad[0]=grad[0]-1*2*(bez_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px2;
-	/* x3 */ 	grad[1]=grad[1]-1*2*(bez_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px3;
-	/* y3 */ 	grad[2]=grad[2]-1*2*(bez_curv[i][1]-xopt[1][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py3;
+	/* x1 */ 	grad[0]=grad[0]-1*2*(geo_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px1;
+	/* y1 */ 	grad[1]=grad[1]-1*2*(geo_curv[i][1]-xopt[1][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py1;
+	/* x2 */ 	grad[2]=grad[2]-1*2*(geo_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px2;
+	/* y2 */ 	grad[3]=grad[3]-1*2*(geo_curv[i][1]-xopt[1][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py2;
+	/* x3 */ 	grad[4]=grad[4]-1*2*(geo_curv[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px3;
+	/* y3 */ 	grad[5]=grad[5]-1*2*(geo_curv[i][1]-xopt[1][j+num_param_pairs])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py3;
 
 			}
 		}
@@ -506,14 +510,12 @@ void geo_inequality_con(unsigned m, double *result, unsigned n, const double* x,
         xopt[1][i] = raw_data[2*i + 1];
     }
 
-	int bez_min_dist=xopt[1][0]; //Order of the Bezier Curve
+	double bez_min_dist=xopt[1][0]; // Minimum distance constraint
 	int bez_curv_pts=xopt[0][1]; //Discretized points on our curve
-	int bez_beta=xopt[1][1]; //Large value to use softmin function which is differentiable (different from alpha used in myfunc)
-	double x1=xopt[0][2]; //These are fixed by initial conditions and thus aren't variables in optimization
-	double y2=xopt[1][2];
-	double x4=xopt[0][3]; //These are fixed by initial conditions and thus aren't variables in optimization
-	double y4=xopt[1][3];
-	int num_param_pairs = 4;
+	double bez_beta=xopt[1][1]; //Large value to use softmin function which is differentiable (different from alpha used in myfunc)
+	double x4=xopt[0][2]; //These are fixed by initial conditions and thus aren't variables in optimization
+	double y4=xopt[1][2];
+	int num_param_pairs = 3;
 	std::vector<std::vector<double>> bez_curv;
 	//Optimization variables:
 	//[0] -> x1
@@ -526,8 +528,8 @@ void geo_inequality_con(unsigned m, double *result, unsigned n, const double* x,
 	//Create the discretized Bezier Curve
 	for(int i=0; i<bez_curv_pts; i++){
 		double t=double(i)/double(bez_curv_pts-1);
-		double bez_x=4*pow(1-t,3)*t*x1+6*pow(1-t,2)*pow(t,2)*x[0]+4*(1-t)*pow(t,3)*x[1]+pow(t,4)*x4;
-		double bez_y=6*pow(1-t,2)*pow(t,2)*y2+4*(1-t)*pow(t,3)*x[2]+pow(t,4)*y4; //y1=0
+		double bez_x=4*pow(1-t,3)*t*x[0]+6*pow(1-t,2)*pow(t,2)*x[2]+4*(1-t)*pow(t,3)*x[4]+pow(t,4)*x4;
+		double bez_y=4*pow(1-t,3)*t*x[1]+6*pow(1-t,2)*pow(t,2)*x[3]+4*(1-t)*pow(t,3)*x[5]+pow(t,4)*y4;
 		bez_curv.push_back({bez_x,bez_y});
 	}
 
@@ -546,8 +548,12 @@ void geo_inequality_con(unsigned m, double *result, unsigned n, const double* x,
 	for(int i=0;i<bez_curv_pts; i++){
 		double t=double(i)/double(bez_curv_pts-1);
 
-		double px2=6*pow(1-t,2)*pow(t,2);double px3=4*(1-t)*pow(t,3);double py3=px3; //Partials of original x & y
-
+		double px1=4*pow(1-t,3)*t;
+		double py1=px1;
+		double px2=6*pow(1-t,2)*pow(t,2);
+		double py2=px2;
+		double px3=4*(1-t)*pow(t,3);
+		double py3=px3;
 
 		//Smooth minimum obstacle distance
 		for(int j=0;j<cols-num_param_pairs;j++){
@@ -555,16 +561,22 @@ void geo_inequality_con(unsigned m, double *result, unsigned n, const double* x,
 			result[num_geo_cons*i]=result[num_geo_cons*i]+exp(-1.0*double(bez_beta)*dist1);
 
 			if(grad){
-		/*x2*/	grad[(num_geo_cons*i)*n]=grad[(num_geo_cons*i)*n]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px2;
-		/*x3*/	grad[(num_geo_cons*i)*n+1]=grad[(num_geo_cons*i)*n+1]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px3;
-		/*y3*/	grad[(num_geo_cons*i)*n+2]=grad[(num_geo_cons*i)*n+2]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+num_param_pairs])/dist1*py3;
+		/*x1*/	grad[(num_geo_cons*i)*n] = grad[(num_geo_cons*i)*n]  +exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px1;
+		/*y1*/	grad[(num_geo_cons*i)*n+1]=grad[(num_geo_cons*i)*n+1]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+num_param_pairs])/dist1*py1;
+		/*x2*/	grad[(num_geo_cons*i)*n+2]=grad[(num_geo_cons*i)*n+2]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px2;
+		/*y2*/	grad[(num_geo_cons*i)*n+3]=grad[(num_geo_cons*i)*n+3]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+num_param_pairs])/dist1*py2;
+		/*x3*/	grad[(num_geo_cons*i)*n+4]=grad[(num_geo_cons*i)*n+4]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px3;
+		/*y3*/	grad[(num_geo_cons*i)*n+5]=grad[(num_geo_cons*i)*n+5]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+num_param_pairs])/dist1*py3;
 			}
 		}
 		if(grad){
 
-			grad[(num_geo_cons*i)*n]=-grad[(num_geo_cons*i)*n]/result[num_geo_cons*i];
+			grad[(num_geo_cons*i)*n]  =-grad[(num_geo_cons*i)*n]  /result[num_geo_cons*i];
 			grad[(num_geo_cons*i)*n+1]=-grad[(num_geo_cons*i)*n+1]/result[num_geo_cons*i];
 			grad[(num_geo_cons*i)*n+2]=-grad[(num_geo_cons*i)*n+2]/result[num_geo_cons*i];
+			grad[(num_geo_cons*i)*n+3]=-grad[(num_geo_cons*i)*n+3]/result[num_geo_cons*i];
+			grad[(num_geo_cons*i)*n+4]=-grad[(num_geo_cons*i)*n+4]/result[num_geo_cons*i];
+			grad[(num_geo_cons*i)*n+5]=-grad[(num_geo_cons*i)*n+5]/result[num_geo_cons*i];
 
 		}
 
@@ -1959,14 +1971,14 @@ class GapBarrier
 		}
 
 
-		int find_max_jump(std::vector<float> ranges, std::vector<double> angles){
+		std::pair<int, int> find_max_jump(int str_indx, int end_indx, std::vector<float> ranges, std::vector<double> angles){
 			// Finds the largest jump in scan data, then returns the point in the center of that jump.
 			double max_jump = 0;	// Size of jump
 			int max_idx;		// Index of start of jump
 			double jump;
 
 			// Only look ahead of the vehicle
-			for(int i =right_ind_MPC; i < left_ind_MPC; ++i){
+			for(int i =str_indx; i < end_indx; ++i){
 				// Get jump between this index and next
 				jump = std::abs(ranges[i]-ranges[i+1]);
 				// Compare with max
@@ -1975,11 +1987,53 @@ class GapBarrier
 					max_idx = i;
 				} 
 			}
-			// Return center point in the middle of the jump
-			// double r = (ranges[max_idx] + ranges[max_idx + 1])/2;
-			// double theta = (angles[max_idx] + angles[max_idx + 1])/2;
-			return max_idx;
-			//return std::make_pair(r*cos(theta), r*sin(theta));
+			// Returns invalid if the jump is too small.
+			// if (max_jump < veh_det_width){return std::make_pair(-1, -1);} 
+			if (max_jump < veh_det_width){max_idx = find_closest_jump(ranges, angles).first;}
+
+
+			// Get the closer point
+			int i = max_idx;
+			double close_pt = (ranges[i] < ranges[i+1]) ? ranges[i] : ranges[i+1];
+			int close_pt_indx = (ranges[i] < ranges[i+1]) ? i   : i+1;
+			int far_pt_indx   = (ranges[i] < ranges[i+1]) ? i+1 : i;
+			double angle = (veh_det_width/close_pt);
+			int offset = int(round(ls_ang_inc * angle)); 
+			if (offset < 1){offset = 1;}
+			if (close_pt_indx == i+1){
+				// Move point left slightly
+				if(far_pt_indx-offset >= str_indx && far_pt_indx-offset >= 0){far_pt_indx = far_pt_indx - offset;}
+			}
+			else if (close_pt_indx == i){
+				// Move point right slightly
+				if(far_pt_indx+offset < end_indx && far_pt_indx+offset < ranges.size()){far_pt_indx=far_pt_indx+offset;}
+			}
+
+			// return max_idx;
+			return std::make_pair(close_pt_indx, far_pt_indx);
+		}
+
+		std::pair<int, int> find_closest_jump(std::vector<float> ranges, std::vector<double> angles){
+			// Finds the largest jump in scan data, then returns the point in the center of that jump.
+			double closest_dist = INFINITY;	// Distance to jump
+			int close_idx;		// Index of start of jump
+			double jump, dist;
+
+			// Only look all around the vehicle
+			for(int i =0; i < ranges.size()-1; ++i){
+				// Get jump between this index and next
+				jump = std::abs(ranges[i]-ranges[i+1]);
+				if (jump > 1.5*veh_det_width){
+					// Compare dist with smallest
+					dist = (ranges[i] + ranges[i+1])/2;
+					if (dist < closest_dist){
+						closest_dist = dist;
+						close_idx = i;
+					} 
+				}
+			}
+
+			return std::make_pair(close_idx, close_idx+1);
 		}
 
 
@@ -2257,6 +2311,7 @@ class GapBarrier
 
 				std::vector<std::vector<double>> obstacle_points_l;
 				std::vector<std::vector<double>> obstacle_points_r;
+				int str_indx, end_indx;
 				double heading_angle;
 
 				std::vector<double> lidar_transform_angles;
@@ -2432,6 +2487,10 @@ class GapBarrier
 						heading_angle_MPC= find_best_point_MPC(str_indx_MPC, end_indx_MPC, proc_ranges_MPC,lidar_transform_angles_tot);
 						heading_angle=heading_angle_MPC;
 						
+						if(num_MPC == 0){
+							str_indx = str_indx_MPC;
+							end_indx = end_indx_MPC;
+						}
 						
 						if(num_MPC==0){
 					
@@ -2622,12 +2681,14 @@ class GapBarrier
 				
 				// Navigate to center of that gap
 
-				int max_jump_idx = find_max_jump(fused_ranges_MPC_tot0,lidar_transform_angles_tot0);
+				std::pair<int,int> max_jump_idxs = find_max_jump(str_indx, end_indx, fused_ranges_MPC_tot0,lidar_transform_angles_tot0);
+				int start_jump = max_jump_idxs.first;
+				int end_jump = max_jump_idxs.second;
 				// double r = (ranges[max_idx] + ranges[max_idx + 1])/2;
 				// double theta = (angles[max_idx] + angles[max_idx + 1])/2;
 
-				std::vector<double> max_jump_start = {fused_ranges_MPC_tot0[max_jump_idx]*cos(lidar_transform_angles_tot0[max_jump_idx]), fused_ranges_MPC_tot0[max_jump_idx]*sin(lidar_transform_angles_tot0[max_jump_idx])};
-				std::vector<double> max_jump_end   = {fused_ranges_MPC_tot0[max_jump_idx+1]*cos(lidar_transform_angles_tot0[max_jump_idx+1]), fused_ranges_MPC_tot0[max_jump_idx+1]*sin(lidar_transform_angles_tot0[max_jump_idx+1])};
+				std::vector<double> max_jump_start = {fused_ranges_MPC_tot0[start_jump]*cos(lidar_transform_angles_tot0[start_jump]), fused_ranges_MPC_tot0[start_jump]*sin(lidar_transform_angles_tot0[start_jump])};
+				std::vector<double> max_jump_end   = {fused_ranges_MPC_tot0[end_jump]*cos(lidar_transform_angles_tot0[end_jump]), fused_ranges_MPC_tot0[end_jump]*sin(lidar_transform_angles_tot0[end_jump])};
 				std::vector<double> max_jump_point = {(max_jump_start[0] + max_jump_end[0])/2, (max_jump_start[1] + max_jump_end[1])/2};
 
 
@@ -2722,39 +2783,39 @@ class GapBarrier
 				// fprintf(file1,"*******************\n");
 				// fclose(file1);
 
+
+
+
 				// Perform first proposed optimization for geometry only
 				nlopt_opt newopt;
-				int num_fixed_pts = 4*2-1; // First point, last point and last point
+				int num_fixed_pts = 2*2; // first point(x0 y0) and last point (x4 y4)
 				newopt = nlopt_create(NLOPT_LD_SLSQP, bez_ctrl_pts*2-num_fixed_pts); /* algorithm and dimensionality */
-				//[0] -> x2
-				//[1] -> x3
-				//[2] -> y3
+
 
 				for (int i=0;i<bez_ctrl_pts*2-num_fixed_pts;i++){
-					nlopt_set_lower_bound(newopt, i, 0); //Bounds on max and min control point coordinates
-					if(i == 2){nlopt_set_lower_bound(newopt, i, -max_lidar_range);}	// Only set minimum of 0 for x, not y to enforce forward points
+					nlopt_set_lower_bound(newopt, i, -max_lidar_range);	
 					nlopt_set_upper_bound(newopt, i, max_lidar_range);
 				}
 
-				double geo_x1= std::max(vel_adapt,min_speed)/4*bez_t_end; //Set the fixed point values here
-				double geo_y2=4.0/3.0*pow(geo_x1,2)*tan(last_delta)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
+
+
+				// double geo_x1= xguess/3; //Set the fixed point values here
+				// double geo_y2=4.0/3.0*pow(geo_x1,2)*tan(last_delta)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
 				double geo_x4=max_jump_point[0];
 				double geo_y4=max_jump_point[1];
 
 				std::vector<double> opt_params1;
 				std::vector<double> opt_params2;
 
-				int num_param_pairs_1 = 4;
-				int num_param_pairs_2 = 4;
+				int num_param_pairs_1 = 3;
+				int num_param_pairs_2 = 3;
 				
 				opt_params1.push_back(num_obs+num_param_pairs_1); opt_params1.push_back(bez_ctrl_pts); 
 				opt_params1.push_back(bez_curv_pts); 	opt_params1.push_back(bez_alpha); 
-				opt_params1.push_back(geo_x1); 			opt_params1.push_back(geo_y2);
 				opt_params1.push_back(geo_x4); 			opt_params1.push_back(geo_y4);
 
 				opt_params2.push_back(num_obs+num_param_pairs_2); 	opt_params2.push_back(bez_min_dist); 
 				opt_params2.push_back(bez_curv_pts); 	opt_params2.push_back(bez_beta);
-				opt_params2.push_back(geo_x1); 			opt_params2.push_back(geo_y2);
 				opt_params2.push_back(geo_x4); 			opt_params2.push_back(geo_y4);
 
 
@@ -2774,9 +2835,27 @@ class GapBarrier
 				nlopt_set_maxtime(newopt, 0.05);
 
 				double geo_x[bez_ctrl_pts*2-num_fixed_pts];  /* `*`some` `initial` `guess`*` */
-				geo_x[0]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
-				geo_x[1]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]),max_lidar_range-1e-6); //x3
-				geo_x[2]=std::min(std::max(-max_lidar_range+1e-6,yptplot[0]),max_lidar_range-1e-6); //y3
+
+				double dist = pow(pow(max_jump_point[0], 2)+pow(max_jump_point[1], 2), 0.5);
+				double ang = atan2(max_jump_point[1], max_jump_point[0]);
+				double xguess=max_jump_point[0];
+				double yguess=max_jump_point[1];
+
+				geo_x[0]=std::min(std::max(-max_lidar_range+1e-6,xguess/4.0),max_lidar_range-1e-6); //x1
+				geo_x[1]=std::min(std::max(-max_lidar_range+1e-6,yguess/4.0),max_lidar_range-1e-6); //y1
+				geo_x[2]=std::min(std::max(-max_lidar_range+1e-6,xguess*2.0/4.0),max_lidar_range-1e-6); //x2
+				geo_x[3]=std::min(std::max(-max_lidar_range+1e-6,yguess*2.0/4.0),max_lidar_range-1e-6); //y2
+				geo_x[4]=std::min(std::max(-max_lidar_range+1e-6,xguess*3.0/4.0),max_lidar_range-1e-6); //x3
+				geo_x[5]=std::min(std::max(-max_lidar_range+1e-6,yguess*3.0/4.0),max_lidar_range-1e-6); //y3
+
+				double geo_init_guess[bez_ctrl_pts*2-num_fixed_pts];
+				geo_init_guess[0] = geo_x[0];
+				geo_init_guess[1] = geo_x[1];
+				geo_init_guess[2] = geo_x[2];
+				geo_init_guess[3] = geo_x[3];
+				geo_init_guess[4] = geo_x[4];
+				geo_init_guess[5] = geo_x[5];
+
 
 				int successful_opt=0;
 
@@ -2788,9 +2867,12 @@ class GapBarrier
 				double opt_time2 = ott2.toSec();
 				printf("OptTime: %lf, Evals: %d\n",opt_time2-opt_time1,nlopt_get_numevals(newopt));
 
-				double geo_x2=geo_x[0];//0;
-				double geo_x3=geo_x[1];//0;
-				double geo_y3=geo_x[2];//0;
+				double geo_x1=geo_x[0];//0;
+				double geo_y1=geo_x[1];//0;
+				double geo_x2=geo_x[2];//0;
+				double geo_y2=geo_x[3];//0;
+				double geo_x3=geo_x[4];//0;
+				double geo_y3=geo_x[5];//0;
 
 				if(isnan(minf)){
 					forcestop=1;
@@ -2801,7 +2883,7 @@ class GapBarrier
 
 				if (optim < 0) {
 					safe_distance_adapt=safe_distance_adapt/2;
-					ROS_ERROR("First Optimization Error, %d, %lf, %lf, %lf\n",optim,geo_x[0],geo_x[1],geo_x[2]);
+					ROS_ERROR("First Optimization Error, %d, %lf, %lf, %lf, %lf, %lf\n",optim,geo_x[0],geo_x[1],geo_x[2],geo_x[3],geo_x[4]);
 					printf("NLOPT Error: %s\n", nlopt_get_errmsg(newopt));
 				}
 				else {
@@ -2809,9 +2891,12 @@ class GapBarrier
 					printf("Successful First Opt: %d\n",optim);
 					safe_distance_adapt=safe_distance;
 					//Save the control points here
-					geo_x2=geo_x[0];
-					geo_x3=geo_x[1];
-					geo_y3=geo_x[2];
+					geo_x1=geo_x[0];
+					geo_y1=geo_x[1];
+					geo_x2=geo_x[2];
+					geo_y2=geo_x[3];
+					geo_x3=geo_x[4];
+					geo_y3=geo_x[5];
 
 				}
 				startcheck=1;
@@ -2858,10 +2943,10 @@ class GapBarrier
 				opt_params1.push_back(bez_x1); opt_params1.push_back(bez_y2);
 				opt_params1.push_back(99); opt_params1.push_back(99); // Filler for now
 				opt_params1.push_back(pot_field_factor_F_QBMPC); opt_params1.push_back(velocity_factor_F_QBMPC);
-				opt_params1.push_back(geo_x1); opt_params1.push_back(geo_x[0]);
-				opt_params1.push_back(geo_y2); opt_params1.push_back(geo_x[1]);
-				opt_params1.push_back(geo_x[2]); opt_params1.push_back(geo_x4);
-				opt_params1.push_back(geo_y4); opt_params1.push_back(1); // Filler
+				opt_params1.push_back(geo_x1); opt_params1.push_back(geo_y1);
+				opt_params1.push_back(geo_x2); opt_params1.push_back(geo_y2); 
+				opt_params1.push_back(geo_x3); opt_params1.push_back(geo_y3); 
+				opt_params1.push_back(geo_x4); opt_params1.push_back(geo_y4);  // Filler
 
 				opt_params2.push_back(num_obs+num_param_pairs_2); opt_params2.push_back(bez_ctrl_pts); opt_params2.push_back(bez_curv_pts); opt_params2.push_back(bez_beta); opt_params2.push_back(bez_x1); opt_params2.push_back(bez_y2);
 				opt_params2.push_back(max_speed); opt_params2.push_back(min_speed); opt_params2.push_back(max_accel); opt_params2.push_back(max_steering_angle); opt_params2.push_back(max_servo_speed);
@@ -3015,7 +3100,7 @@ class GapBarrier
 					marker.points.push_back(p);
 				}
 
-				p.x = geo_x1; p.y = 0; p.z = 0;
+				p.x = geo_x1; p.y = geo_y1; p.z = 0;
 				marker.points.push_back(p);
 				p.x = geo_x2; p.y = geo_y2; p.z = 0;
 				marker.points.push_back(p);
@@ -3028,7 +3113,7 @@ class GapBarrier
 				for(int i=0; i<bez_curv_pts*10; i++){
 					double t=double(i)/double(bez_curv_pts*10-1);
 					double geo_x=4*pow(1-t,3)*t*geo_x1+6*pow(1-t,2)*pow(t,2)*geo_x2+4*(1-t)*pow(t,3)*geo_x3+pow(t,4)*geo_x4;
-					double geo_y=6*pow(1-t,2)*pow(t,2)*geo_y2+4*(1-t)*pow(t,3)*geo_y3+pow(t,4)*geo_y4; //y1=0
+					double geo_y=4*pow(1-t,3)*t*geo_y1+6*pow(1-t,2)*pow(t,2)*geo_y2+4*(1-t)*pow(t,3)*geo_y3+pow(t,4)*geo_y4; //y1=0
 					p.x = geo_x; p.y = geo_y; p.z = 0;
 					marker.points.push_back(p);
 				}
@@ -3253,16 +3338,20 @@ class GapBarrier
 				bez_guess.lifetime = ros::Duration(0.1);
 				geometry_msgs::Point p8;
 				bez_guess.points.clear();
-				for (const auto& obstacle1 : sub_bez_obs) {
-					p8.x = obstacle1[0]; p8.y = obstacle1[1]; p8.z = 0;
-					bez_guess.points.push_back(p8);
-				}
 
 				for(int i=0; i<bez_curv_pts*10; i++){
 					double t=double(i)/double(bez_curv_pts*10-1);
 					double bez_x=4*pow(1-t,3)*t*bez_x1+6*pow(1-t,2)*pow(t,2)*init_guess[0]+4*(1-t)*pow(t,3)*init_guess[1]+pow(t,4)*bez_x4;
 					double bez_y=6*pow(1-t,2)*pow(t,2)*bez_y2+4*(1-t)*pow(t,3)*init_guess[2]+pow(t,4)*bez_y4; //y1=0
 					p8.x = bez_x; p8.y = bez_y; p8.z = 0;
+					bez_guess.points.push_back(p8);
+				}
+
+				for(int i=0; i<bez_curv_pts*10; i++){
+					double t=double(i)/double(bez_curv_pts*10-1);
+					double geo_x=4*pow(1-t,3)*t*geo_init_guess[0]+6*pow(1-t,2)*pow(t,2)*geo_init_guess[2]+4*(1-t)*pow(t,3)*geo_init_guess[4]+pow(t,4)*geo_x4;
+					double geo_y=4*pow(1-t,3)*t*geo_init_guess[1]+6*pow(1-t,2)*pow(t,2)*geo_init_guess[3]+4*(1-t)*pow(t,3)*geo_init_guess[5]+pow(t,4)*geo_y4; //y1=0
+					p8.x = geo_x; p8.y = geo_y; p8.z = 0;
 					bez_guess.points.push_back(p8);
 				}
 
