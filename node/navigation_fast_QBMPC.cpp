@@ -173,21 +173,21 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 			}
 		}
 		
-		// // Variables used in velocity term and gradients
-		// double x_dot=4*x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
-		// double y_dot=6*y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
-		// double pdx2=6*(4*pow(t,3)-6*pow(t,2)+2*t);double pdx3=4*(-4*pow(t,3)+3*pow(t,2));double pdy3=pdx3;double pdx4=4*pow(t,3);double pdy4=pdx4; //X_dot & y_dot
+		// Variables used in velocity term and gradients
+		double x_dot=4*x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
+		double y_dot=6*y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
+		double pdx2=6*(4*pow(t,3)-6*pow(t,2)+2*t);double pdx3=4*(-4*pow(t,3)+3*pow(t,2));double pdy3=pdx3;double pdx4=4*pow(t,3);double pdy4=pdx4; //X_dot & y_dot
 		
-		// // Additional objective term favoring high velocities
-		// double vel2 = pow(x_dot,2)+pow(y_dot,2);
-		// funcreturn=funcreturn + (10/vel2);// Sum of reciprocal squared velocities 
-		// if(grad){
-		// /*M_x2*/	grad[0]=grad[0]-(vel_factor/pow(vel2,2))*2*x_dot*pdx2;
-		// /*M_x3*/	grad[1]=grad[1]-(vel_factor/pow(vel2,2))*2*x_dot*pdx3;
-		// /*M_y3*/	grad[2]=grad[2]-(vel_factor/pow(vel2,2))*2*y_dot*pdy3;
-		// /*M_x4*/	grad[3]=grad[3]-(vel_factor/pow(vel2,2))*2*x_dot*pdx4;
-		// /*M_y4*/	grad[4]=grad[4]-(vel_factor/pow(vel2,2))*2*y_dot*pdy4;
-		// }		
+		// Additional objective term favoring high velocities
+		double vel2 = pow(x_dot,2)+pow(y_dot,2);
+		funcreturn=funcreturn + (vel_factor/vel2);// Sum of reciprocal squared velocities 
+		if(grad){
+		/*M_x2*/	grad[0]=grad[0]-(vel_factor/pow(vel2,2))*2*x_dot*pdx2;
+		/*M_x3*/	grad[1]=grad[1]-(vel_factor/pow(vel2,2))*2*x_dot*pdx3;
+		/*M_y3*/	grad[2]=grad[2]-(vel_factor/pow(vel2,2))*2*y_dot*pdy3;
+		/*M_x4*/	grad[3]=grad[3]-(vel_factor/pow(vel2,2))*2*x_dot*pdx4;
+		/*M_y4*/	grad[4]=grad[4]-(vel_factor/pow(vel2,2))*2*y_dot*pdy4;
+		}		
 
 				
 		
@@ -1871,6 +1871,9 @@ class GapBarrier
 
 
 		double find_missing_scan_gap_MPC(std::vector<double> lidar_transform_angles){
+			// Finds the largest difference in scan angles
+			// When predicted point is projected forward, the angles between lidar scans is changed
+			// Attempt to navigate to the center of a large gap since there is a large empty space in the scan data 
 			double best_heading=0;
 			double max_gap=0;
 			double start_gap=0;
@@ -1930,104 +1933,46 @@ class GapBarrier
 
 
 		double find_best_point_MPC(int start_i, int end_i, std::vector<float> proc_ranges, std::vector<double> lidar_transform_angles){
-			int jump_idx = 0;
-			std::vector<float> ranges = proc_ranges;
-			// Finds the max jump in the scan data
-			jump_idx = find_max_jump(ranges, lidar_transform_angles);
-
-			if (jump_idx != -1){
-
-				// Get the closer point
-				int i = jump_idx;
-				double close_pt = (ranges[i] < ranges[i+1]) ? ranges[i] : ranges[i+1];
-				// Find angle needed to accomodate half vehicle width
-				double angle = (veh_det_width/close_pt)/2;
-				// Extend close width on either side of this jump 
-				bool in_angle = false;
-				int offset = 1;
-				// Left side first
-				while(!in_angle){
-					// Make sure offset point is still valid
-					if(i-offset >= start_i && i-offset >= 0){
-						// Only change larger ranges
-						if(ranges[i-offset] > close_pt){
-							proc_ranges[i-offset] = close_pt;
-						}
-						// Exit if the total angle is larger than the required angle
-						if(std::abs(lidar_transform_angles[i]-lidar_transform_angles[i-offset]) > angle){
-							in_angle = true; 
-						}
-					}
-					else{break;}
-					offset++;
-				} 
-				// Then right side
-				in_angle = false;
-				offset = 1;
-				while(!in_angle){
-					if(i+offset < end_i && i+offset < ranges.size()){
-						if(ranges[i+offset] > close_pt){
-							proc_ranges[i+offset] = close_pt;
-						}
-						// Exit if the total angle is larger than the required angle
-						if(std::abs(lidar_transform_angles[i]-lidar_transform_angles[i+offset]) > angle){
-							in_angle = true; 
-						}
-					}
-					else{break;}
-					offset++;
-				} 
-			}
 			
-			// double jump;
-			// // Finds jumps in scan data, then extends the nearby wall to accomodate vehicle width
-			// for(int i =start_i; i < end_i; ++i){
-			// 	// Get jump between this index and next
-			// 	jump = std::abs(ranges[i]-ranges[i+1]);
-			// 	// Check the length of the jump
-			// 	if (jump > 2*veh_det_width){
-			// 		double close_pt = (ranges[i] < ranges[i+1]) ? ranges[i] : ranges[i+1];
-			// 		// Find angle needed to accomodate half vehicle width
-			// 		double angle = (veh_det_width/close_pt)/2;
-			// 		// Extend close width on either side of this jump 
-			// 		bool in_angle = false;
-			// 		int offset = 1;
-			// 		// Left side first
-			// 		while(!in_angle){
-			// 			// Make sure offset point is still valid
-			// 			if(i-offset >= start_i && i-offset >= 0){
-			// 				// Only change larger ranges
-			// 				if(ranges[i-offset] > close_pt){
-			// 					proc_ranges[i-offset] = close_pt;
-			// 				}
-			// 				// Exit if the total angle is larger than the required angle
-			// 				if(std::abs(lidar_transform_angles[i]-lidar_transform_angles[i-offset]) > angle){
-			// 					in_angle = true; 
-			// 				}
-			// 			}
-			// 			else{break;}
-			// 			offset++;
-			// 		} 
-			// 		// Then right side
-			// 		in_angle = false;
-			// 		offset = 1;
-			// 		while(!in_angle){
-			// 			if(i+offset < end_i && i+offset < ranges.size()){
-			// 				if(ranges[i+offset] > close_pt){
-			// 					proc_ranges[i+offset] = close_pt;
-			// 				}
-			// 				// Exit if the total angle is larger than the required angle
-			// 				if(std::abs(lidar_transform_angles[i]-lidar_transform_angles[i+offset]) > angle){
-			// 					in_angle = true; 
-			// 				}
-			// 			}
-			// 			else{break;}
-			// 			offset++;
-			// 		} 
-			// 	}
+			double best_heading = 0;
+			// Finds the max jump in the scan data
+			// int jump_idx = find_max_jump(start_i, end_i, ranges, lidar_transform_angles);
+			// std::cout << "Jump Index: " << jump_idx <<std::endl;
+
+			// if (jump_idx != -1){
+
+			// 	double best_heading = 0;
+			// 	best_heading = (lidar_transform_angles[jump_idx]+lidar_transform_angles[jump_idx+1])/2;
+			// 	std::cout << "Best Jump Heading: " << best_heading <<std::endl;
+			// 	return best_heading;
 			// }
 
-			double best_heading = 0;
+			// Finds the max arc length jump in the scan data
+			double max_arc = 0;
+			int max_idx;
+			for(int i =start_i; i < end_i; ++i){
+				// Get jump between this index and next
+				double close_pt = (proc_ranges[i] < proc_ranges[i+1]) ? proc_ranges[i] : proc_ranges[i+1];
+				double ang = std::abs(lidar_transform_angles[i]-lidar_transform_angles[i+1]);
+				double arc = close_pt*ang;
+				// Compare with max
+				if (arc > max_arc){
+					//std::cout << "Arc of " << arc << " at index " << i <<std::endl;
+					max_arc = arc;
+					max_idx = i;
+				} 
+			}
+			std::cout << "Max Arc: " << max_arc <<std::endl;
+
+			// Arc is too small
+			if (max_arc >= 1.5*veh_det_width){
+				best_heading = (lidar_transform_angles[max_idx]+lidar_transform_angles[max_idx+1])/2;
+				return best_heading;
+			}
+			
+
+			// No arc/jump found, go to the furthest point in the scan direction instead 
+			
 			double max_range = 0; 
 
 			for(int i=start_i; i<=end_i; ++i){
@@ -2038,7 +1983,8 @@ class GapBarrier
 			}
 			
 			// best_heading=(lidar_transform_angles[start_i]+lidar_transform_angles[end_i])/2;
-
+			std::cout << "Max Range: " << max_range <<std::endl;
+			std::cout << "Best Avg Heading: " << best_heading <<std::endl;
 			return best_heading; 
 		}
 
@@ -2083,24 +2029,26 @@ class GapBarrier
 
 
 
-		int find_max_jump(std::vector<float> ranges, std::vector<double> angles){
+		int find_max_jump(int start_i, int end_i, std::vector<float> ranges, std::vector<double> angles){
 			// Finds the largest jump in scan data, then returns the point in the center of that jump.
 			double max_jump = 0;	// Size of jump
 			int max_idx = 0;		// Index of start of jump
 			double jump = 0;
 
 			// Only look ahead of the vehicle
-			for(int i =right_ind_MPC; i < left_ind_MPC; ++i){
+			for(int i =start_i; i < end_i; ++i){
 				// Get jump between this index and next
 				jump = std::abs(ranges[i]-ranges[i+1]);
 				// Compare with max
 				if (jump > max_jump){
+					//std::cout << "Jump of " << jump << " at index" << i <<std::endl;
 					max_jump = jump;
 					max_idx = i;
 				} 
 			}
+			std::cout << "Max Jump: " << max_jump <<std::endl;
 
-			// Jump is to small
+			// Jump is too small
 			if (max_jump < 2*veh_det_width){
 				return -1; 
 			}
@@ -2387,7 +2335,7 @@ class GapBarrier
 
 				std::vector<std::vector<double>> obstacle_points_l;
 				std::vector<std::vector<double>> obstacle_points_r;
-				int str_indx_1, end_indx_1, str_indx_2, end_indx_2;
+				int str_indx_1=0, end_indx_1=0, str_indx_2=0, end_indx_2=0;
 				double heading_angle;
 
 				std::vector<double> lidar_transform_angles;
@@ -2555,8 +2503,6 @@ class GapBarrier
 					
 					if(heading_angle_MPC==5 || num_MPC==0){ //Use the other method to find the heading angle (if gap is large enough, use this prior value)
 						if(num_MPC > 0){
-
-
 							str_indx_MPC = right_ind_MPC; end_indx_MPC = left_ind_MPC;
 							heading_angle_MPC= find_best_point_MPC(str_indx_MPC, end_indx_MPC, proc_ranges_MPC,lidar_transform_angles_tot);
 							
@@ -2789,8 +2735,8 @@ class GapBarrier
 				// printf("fused_ranges size: %d\n",fused_ranges_MPC_tot0.size());
 				// printf("transform_angles size: %d\n",lidar_transform_angles_tot0.size());
 
-
-				int max_jump_idx = find_max_jump(fused_ranges_MPC_tot0,lidar_transform_angles_tot0);
+				// Maybe change the start and end indices for this calculation to be the ones from the first preprocessed lidar scan
+				int max_jump_idx = find_max_jump(str_indx_1, end_indx_1, fused_ranges_MPC_tot0,lidar_transform_angles_tot0);
 
 				std::vector<double> max_jump_start = {1, -.1};
 				std::vector<double> max_jump_end   = {1, 0.1};
