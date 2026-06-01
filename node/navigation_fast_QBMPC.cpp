@@ -1898,7 +1898,7 @@ class GapBarrier
 		}
 
 
-		std::pair<int, int> find_max_gap_MPC(std::vector<float> proc_ranges, std::vector<double> lidar_transform_angles){
+		std::pair<int, int> find_max_gap_MPC(int start, int end, std::vector<float> proc_ranges, std::vector<double> lidar_transform_angles){
 			int j =0; int str_indx = 0; int end_indx = 0; 
 			int str_indx2 = 0; int end_indx2 = 0;
 			double range_sum = 0; double range_sum_new = 0;
@@ -1906,7 +1906,7 @@ class GapBarrier
 
 			/*This just finds the start and end indices of gaps (non-safe distance lidar return)
 			then does a comparison to find the largest such gap.*/
-			for(int i =right_ind_MPC; i <= left_ind_MPC; ++i){
+			for(int i =start; i <= end; ++i){
 				
 				if(proc_ranges[i] != 0){
 					if (j==0){
@@ -1917,7 +1917,7 @@ class GapBarrier
 					range_sum_new += proc_ranges[i]*(lidar_transform_angles[i+1]-lidar_transform_angles[i-1])/2;
 					end_indx = i;
 				}
-				if(j==1 && (proc_ranges[i] == 0 || i == left_ind_MPC)){
+				if(j==1 && (proc_ranges[i] == 0 || i == end)){
 					j = 0;
 
 					if(range_sum_new > range_sum){
@@ -1932,7 +1932,7 @@ class GapBarrier
 		}
 
 
-		double find_best_point_MPC(int start_i, int end_i, std::vector<float> proc_ranges, std::vector<double> lidar_transform_angles){
+		double find_best_point_MPC(std::pair<double, double> ran_ang, int start_i, int end_i, std::vector<float> proc_ranges, std::vector<double> lidar_transform_angles){
 			
 			double best_heading = 0;
 			// Finds the max jump in the scan data
@@ -1962,26 +1962,48 @@ class GapBarrier
 					max_idx = i;
 				} 
 			}
-			std::cout << "Max Arc: " << max_arc <<std::endl;
-
-			// Arc is too small
+		
+			// Arc is big enough
 			if (max_arc >= veh_det_width){
+				std::cout << "Max Arc: " << max_arc <<std::endl;
+				// nav to middle of arc
 				best_heading = (lidar_transform_angles[max_idx]+lidar_transform_angles[max_idx+1])/2;
 				return best_heading;
 			}
-			
+			// std::cout << "Range and Angle from Ego: > " << ran_ang.first << "m  and " << ran_ang.second*180/M_PI << " deg. " << std::endl;
+			// std::cout << "Angle Bounds: > " << (M_PI_2-ran_ang.second)*180/M_PI << " or < " << (-M_PI_2 - ran_ang.second)*180/M_PI <<std::endl;
 
-			// No arc/jump found, go to the furthest point in the scan direction instead 
-			// double max_range = 0; 
-
-			// for(int i=start_i; i<=end_i; ++i){
-			// 	if(proc_ranges[i] > max_range){
-			// 		max_range = proc_ranges[i];
-			// 		best_heading = lidar_transform_angles[i];
-			// 	}
-			// }
+			// No arc/jump found, go to the furthest point in the scan gap instead 
+			// Find scan gap
+			std::pair<int, int> scan_gap = find_max_gap_MPC(start_i, end_i, proc_ranges, lidar_transform_angles);
+			// std::cout << "Scan Gap: " << (lidar_transform_angles[scan_gap.first])*180/M_PI << " to " << (lidar_transform_angles[scan_gap.second])*180/M_PI <<std::endl;
+			double max_range = 0;
+			for(int i=scan_gap.first; i<=scan_gap.second; ++i){
+				if(proc_ranges[i] > max_range){
+					// Check if range meets criteria of not ending behind the vehicle
+					double ang = lidar_transform_angles[i];
+					// Angle condition
+					if(ang > (M_PI_2-ran_ang.second) || ang < (-M_PI_2-ran_ang.second)){
+						// Range condition
+						double r;
+						if(ang < 0){r=ran_ang.first*cos(ran_ang.second)/sin(ang-(M_PI_2-ran_ang.second));}
+						else{r=ran_ang.first*cos(ran_ang.second)/sin(ang-(-M_PI_2-ran_ang.second));}
+						
+						if(proc_ranges[i] < r){
+							// std::cout << "Range " << proc_ranges[i] << " < " << r << std::endl;
+							// std::cout << "From angle " << ang*180/M_PI << std::endl;
+							max_range = proc_ranges[i];
+							best_heading = ang;
+						}
+					}
+					else{
+						max_range = proc_ranges[i];
+						best_heading = ang;
+					}
+				}
+			}
 			// Go to middle of scan direction
-			best_heading=(lidar_transform_angles[start_i]+lidar_transform_angles[end_i])/2;
+			// best_heading=(lidar_transform_angles[start_i]+lidar_transform_angles[end_i])/2;
 			// std::cout << "Max Range: " << max_range <<std::endl;
 			return best_heading; 
 		}
@@ -2044,7 +2066,7 @@ class GapBarrier
 					max_idx = i;
 				} 
 			}
-			std::cout << "Max Jump: " << max_jump <<std::endl;
+			// std::cout << "Max Jump: " << max_jump <<std::endl;
 
 			// Jump is too small
 			if (max_jump < 2*veh_det_width){
@@ -2336,6 +2358,7 @@ class GapBarrier
 				int str_indx_1=0, end_indx_1=0, str_indx_2=0, end_indx_2=0;
 				int init_start_ang_tform = 0;
 				int init_end_ang_tform = 0;
+				std::pair<double,double> first_MPC;
 				double heading_angle;
 
 				std::vector<double> lidar_transform_angles;
@@ -2503,26 +2526,23 @@ class GapBarrier
 					
 					if(heading_angle_MPC==5 || num_MPC==0){ //Use the other method to find the heading angle (if gap is large enough, use this prior value)
 						if(num_MPC == 0){
-							std::pair<int,int> max_gap_MPC = find_max_gap_MPC(proc_ranges_MPC,lidar_transform_angles_tot);
+							std::pair<int,int> max_gap_MPC = find_max_gap_MPC(right_ind_MPC, left_ind_MPC, proc_ranges_MPC,lidar_transform_angles_tot);
 							str_indx_MPC = max_gap_MPC.first; end_indx_MPC = max_gap_MPC.second;
 							heading_angle_MPC = (lidar_transform_angles_tot[str_indx_MPC]+lidar_transform_angles_tot[end_indx_MPC])/2;
 
-							std::cout << "Heading 1 Between " << lidar_transform_angles_tot[str_indx_MPC]*180/M_PI << " and " << lidar_transform_angles_tot[end_indx_MPC]*180/M_PI <<std::endl;
-							std::cout << "Heading 1: " << heading_angle_MPC*180/M_PI <<std::endl;
+							// std::cout << "Heading 1 Between " << lidar_transform_angles_tot[str_indx_MPC]*180/M_PI << " and " << lidar_transform_angles_tot[end_indx_MPC]*180/M_PI <<std::endl;
+							// std::cout << "Heading 1: " << heading_angle_MPC*180/M_PI <<std::endl;
 
 							str_indx_1 = str_indx_MPC;
 							end_indx_1 = end_indx_MPC;
 						}
 						else{
-							// TODO Still needs work on this choice, looks to walls many times due to arc length calculation possibly being off
-
 							str_indx_MPC = right_ind_MPC; end_indx_MPC = left_ind_MPC;
-							// heading_angle_MPC= find_best_point_MPC(str_indx_MPC, end_indx_MPC, proc_ranges_MPC,lidar_transform_angles_tot);
-							// std::cout << "Heading 2 Between " << lidar_transform_angles_tot[str_indx_MPC]*180/M_PI << " and " << lidar_transform_angles_tot[end_indx_MPC]*180/M_PI <<std::endl;
+							// Pass in the angle and range of the MPC of the vehicle (Will need to change for multiple MPC points)
 							// Use angles from initial widest gap of vehicle
-							heading_angle_MPC= find_best_point_MPC(init_start_ang_tform, init_end_ang_tform, proc_ranges_MPC,lidar_transform_angles_tot);
-							std::cout << "Heading 2 Between " << lidar_transform_angles_tot[init_start_ang_tform]*180/M_PI << " and " << lidar_transform_angles_tot[init_end_ang_tform]*180/M_PI <<std::endl;
-							std::cout << "Heading 2: " << heading_angle_MPC*180/M_PI <<std::endl;
+							heading_angle_MPC= find_best_point_MPC(first_MPC, init_start_ang_tform, init_end_ang_tform, proc_ranges_MPC,lidar_transform_angles_tot);
+							// std::cout << "Heading 2 Between " << lidar_transform_angles_tot[init_start_ang_tform]*180/M_PI << " and " << lidar_transform_angles_tot[init_end_ang_tform]*180/M_PI <<std::endl;
+							// std::cout << "Heading 2: " << heading_angle_MPC*180/M_PI <<std::endl;
 
 							str_indx_2 = str_indx_MPC;
 							end_indx_2 = end_indx_MPC;
@@ -2677,19 +2697,9 @@ class GapBarrier
 					while (theta_ref>M_PI) theta_ref-=2*M_PI;
 					while (theta_ref<-M_PI) theta_ref+=2*M_PI;
 					theta_refs[num_MPC]=theta_ref;
-					//For first, drive 3/4 of the way, second drive the last 1/4 since first three points are fixed
-					// if(num_MPC==0){
-					// 	xpt=xpt+std::max(vel_adapt,min_speed)*bez_t_end*3.0/(bez_ctrl_pts-1)*cos(theta_ref); //Drive message relates to lidar callback scan topic, ~10Hz
-					// 	ypt=ypt+std::max(vel_adapt,min_speed)*bez_t_end*3.0/(bez_ctrl_pts-1)*sin(theta_ref); //Use 13 Hz as absolute optimal but likely slower use dt
-					// }
-					// else{
-					// 	xpt=xpt+std::max(vel_adapt,min_speed)*bez_t_end/(bez_ctrl_pts-1)*cos(theta_ref); //Drive message relates to lidar callback scan topic, ~10Hz
-					// 	ypt=ypt+std::max(vel_adapt,min_speed)*bez_t_end/(bez_ctrl_pts-1)*sin(theta_ref); //Use 13 Hz as absolute optimal but likely slower use dt
-					// }
 
 					// Either drive as fast as you can in the chosen direciton, or drive 3/4 the way to the obstacle we are facing (Remove reliance on current speed)
 					double dist = std::min(max_speed*bez_t_end, obst_ahead_dist*3/4);
-					std::cout << "Dist: " << dist <<std::endl;
 					if(num_MPC==0){
 						xpt=xpt+dist*3/(bez_ctrl_pts-1)*cos(theta_ref); //Drive message relates to lidar callback scan topic, ~10Hz
 						ypt=ypt+dist*3/(bez_ctrl_pts-1)*sin(theta_ref); //Use 13 Hz as absolute optimal but likely slower use dt
@@ -2699,8 +2709,11 @@ class GapBarrier
 						ypt=ypt+dist/(bez_ctrl_pts-1)*sin(theta_ref); //Use 13 Hz as absolute optimal but likely slower use dt
 					}
 					
-					// If the xpt is zero... there's a dead end ahead of us and we should back up/turn around
-					if(xpt == 0){std::cout << "Turn Around!!" <<std::endl;}
+					// Save first MPC relative location
+					first_MPC.first = sqrt(pow(xpt, 2) + pow(ypt, 2));
+					first_MPC.second = theta_ref;
+					// If the xpt is less than safe distance... there's likely a dead end ahead of us and we should back up/turn around
+					if(nMPC == 0 && xpt <= safe_distance_adapt){std::cout << "Back Up!!" <<std::endl;}
 					
 					xptplot[num_MPC]=xpt;
 					yptplot[num_MPC]=ypt;
@@ -2893,6 +2906,7 @@ class GapBarrier
 				nlopt_add_inequality_mconstraint(opt, num_cons*bez_curv_pts, bezier_inequality_con, opt_params2.data(), tol);
 			
 				nlopt_set_xtol_rel(opt, 0.001); //Termination parameters
+				nlopt_set_xtol_abs1(opt, 0.001);
 				nlopt_set_maxtime(opt, 0.05);
 
 
@@ -2942,11 +2956,12 @@ class GapBarrier
 				if (optim < 0) {
 					safe_distance_adapt=safe_distance_adapt/2;
 					ROS_ERROR("Optimization Error, %d, %lf, %lf, %lf, %lf, %lf\n",optim,x[0],x[1],x[2],x[3],x[4]);
-					printf("NLOPT Error: %s\n", nlopt_get_errmsg(opt));
+					// printf("NLOPT Error: %s\n", nlopt_get_errmsg(optim));
+					printf("NLOPT Error: %s\n", nlopt_result_to_string(optim));
 				}
 				else {
 					successful_opt=1;
-					printf("Successful Opt: %d\n",optim);
+					printf("Successful Opt: %s\n", nlopt_result_to_string(optim));
 					safe_distance_adapt=safe_distance;
 					//Save the control points here
 					bez_x2=x[0];
@@ -2979,9 +2994,7 @@ class GapBarrier
 					last_delta=atan2(curv*wheelbase,1);
 					last_delta=std::max(-max_steering_angle,last_delta);
 					last_delta=std::min(max_steering_angle,last_delta);
-					std::cout << "Vel Adapt Pre Opt: " << vel_adapt <<std::endl;
 					vel_adapt=std::min(pow(pow(x_dot,2)+pow(y_dot,2),0.5)/bez_t_end,max_speed);
-					std::cout << "Vel Adapt Post Opt: " << vel_adapt <<std::endl;
 
 					
 
@@ -3160,7 +3173,7 @@ class GapBarrier
 				obst_mark.publish(obst);
 
 
-				//Publish the scan gap (line from right obstacles to left obstacles)
+				//Publish the scan gap (Line from left to right of widest gap)
 				scan_gap_marker.header.frame_id = base_frame;
 				scan_gap_marker.header.stamp = ros::Time::now();
 				scan_gap_marker.type = visualization_msgs::Marker::LINE_LIST;
@@ -3178,37 +3191,35 @@ class GapBarrier
 				geometry_msgs::Point p6;
 				scan_gap_marker.points.clear();
 				
-				// p6.x = obstacle_points_l[0][0];	p6.y = obstacle_points_l[0][1];	p6.z = 0;
-				// scan_gap_marker.points.push_back(p6); 	// First point in left obstacles
+				std::vector<double> gap_start = {fused_ranges_MPC_tot0[str_indx_1]*cos(lidar_transform_angles_tot0[str_indx_1]), fused_ranges_MPC_tot0[str_indx_1]*sin(lidar_transform_angles_tot0[str_indx_1])};
+				std::vector<double> gap_end   = {fused_ranges_MPC_tot0[end_indx_1]*cos(lidar_transform_angles_tot0[end_indx_1]), fused_ranges_MPC_tot0[end_indx_1]*sin(lidar_transform_angles_tot0[end_indx_1])};
+				std::vector<double> gap_middle  = {xptplot[0], yptplot[0]};
 
-				// p6.x = obstacle_points_r[obstacle_points_r.size()-1][0];	p6.y = obstacle_points_r[obstacle_points_r.size()-1][1];	p6.z = 0;
-				// scan_gap_marker.points.push_back(p6); 	// Last point in right obstacles
-				std::vector<double> gap_start_1 = {fused_ranges_MPC_tot0[str_indx_1]*cos(lidar_transform_angles_tot0[str_indx_1]), fused_ranges_MPC_tot0[str_indx_1]*sin(lidar_transform_angles_tot0[str_indx_1])};
-				std::vector<double> gap_end_1   = {fused_ranges_MPC_tot0[end_indx_1]*cos(lidar_transform_angles_tot0[end_indx_1]), fused_ranges_MPC_tot0[end_indx_1]*sin(lidar_transform_angles_tot0[end_indx_1])};
-
-				std::vector<double> gap_start_2 = {fused_ranges_MPC_tot0[str_indx_2]*cos(lidar_transform_angles_tot0[str_indx_2]), fused_ranges_MPC_tot0[str_indx_2]*sin(lidar_transform_angles_tot0[str_indx_2])};
-				std::vector<double> gap_end_2   = {fused_ranges_MPC_tot0[end_indx_2]*cos(lidar_transform_angles_tot0[end_indx_2]), fused_ranges_MPC_tot0[end_indx_2]*sin(lidar_transform_angles_tot0[end_indx_2])};
-				p6.x = gap_start_1[0];	p6.y = gap_start_1[1];	p6.z = 0;
+				p6.x = gap_start[0];	p6.y = gap_start[1];	p6.z = 0;
 				scan_gap_marker.points.push_back(p6); 	
 
-				p6.x = gap_end_1[0];	p6.y = gap_end_1[1];	p6.z = 0;
+				p6.x = gap_end[0];	p6.y = gap_end[1];	p6.z = 0;
 				scan_gap_marker.points.push_back(p6); 	
 
-				// p6.x = gap_start_2[0];	p6.y = gap_start_2[1];	p6.z = 0;
-				// scan_gap_marker.points.push_back(p6); 	
+				p6.x = gap_start[0];	p6.y = gap_start[1];	p6.z = 0;
+				scan_gap_marker.points.push_back(p6); 
+				p6.x = gap_middle[0];	p6.y = gap_middle[1];	p6.z = 0;
+				scan_gap_marker.points.push_back(p6); 	
 
-				// p6.x = gap_end_2[0];	p6.y = gap_end_2[1];	p6.z = 0;
-				// scan_gap_marker.points.push_back(p6); 	
+				p6.x = gap_middle[0];	p6.y = gap_middle[1];	p6.z = 0;
+				scan_gap_marker.points.push_back(p6); 
+				p6.x = gap_end[0];	p6.y = gap_end[1];	p6.z = 0;
+				scan_gap_marker.points.push_back(p6); 	
 
 				// Theta refs
 				p6.x = 0; p6.y = 0; p6.z = 0;
 				scan_gap_marker.points.push_back(p6); 
-				p6.x = 1.5*cos(theta_refs[0]); p6.y = 1.5*sin(theta_refs[0]); p6.z = 0;
+				p6.x = 1.5*cos(theta_refs[0]); p6.y = 1*sin(theta_refs[0]); p6.z = 0;
 				scan_gap_marker.points.push_back(p6); 
 
 				p6.x = xptplot[0]; p6.y = yptplot[0]; p6.z = 0;
 				scan_gap_marker.points.push_back(p6); 
-				p6.x = 1.5*cos(theta_refs[1]) + xptplot[0]; p6.y = 1.5*sin(theta_refs[1]) + yptplot[0]; p6.z = 0;
+				p6.x = 1.5*cos(theta_refs[1]) + xptplot[0]; p6.y = 1*sin(theta_refs[1]) + yptplot[0]; p6.z = 0;
 				scan_gap_marker.points.push_back(p6); 
 
 
@@ -3343,9 +3354,7 @@ class GapBarrier
 				delta_d=last_delta; //Use next delta command now to allow servo to transition
 
 				velocity_MPC = velocity_scale*vel_adapt; //Implement slowing if we near an obstacle
-				std::cout << "Vel Adapt Pre Scale: " << vel_adapt <<std::endl;
 				vel_adapt=velocity_MPC;
-				std::cout << "Vel Adapt Post Scale: " << vel_adapt <<std::endl;
 
 			}
 
