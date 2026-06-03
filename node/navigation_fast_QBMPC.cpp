@@ -1808,40 +1808,113 @@ class GapBarrier
 			return best_heading; 
 		}
 
+		std::vector<float> extend_disparities(int start_i, int end_i, std::vector<float> ranges, std::vector<double> lidar_angles){
+			// Finds jumps in the scan data and extends the close wall to accomodate for the vehicle width
+			std::vector<float> proc_ranges = ranges;
+			// std::cout << "Extending Disparities... " << std::endl;
+			for(int i =start_i; i < end_i; ++i){
+				// Get jump between this index and next with law of cosines (angles may not be equally spaced)
+				// std::cout << "Getting Jump... " << std::endl;
+				double ang = std::abs(lidar_angles[i]-lidar_angles[i+1]);
+				double jump = sqrt(pow(ranges[i],2) + pow(ranges[i+1],2)-2*ranges[i]*ranges[i+1]*cos(ang));
+				// Check the length of the jump
+				if (jump > 1){
+					// std::cout << "Finding Close Pt..." << std::endl;
+					double close_pt = (ranges[i] < ranges[i+1]) ? ranges[i] : ranges[i+1];
+					// Extend close width on either side of this jump 
+					bool in_angle = false;
+					int offset = 1;
+					// Left side first
+					// std::cout << "Starting Left Side..." << std::endl;
+					while(!in_angle){
+						// Make sure offset point is still valid
+						if(i-offset >= start_i && i-offset >= 0){
+							// Only change larger ranges
+							if(ranges[i-offset] > close_pt){
+								// std::cout << "Extended L!" << std::endl;
+								proc_ranges[i-offset] = close_pt;
+							}
+							// Exit if the total distance is larger than the required angle
+							// std::cout << "Checking Distance L..." << std::endl;
+							double ang = std::abs(lidar_angles[i]-lidar_angles[i-offset]);
+							double dist = sqrt(pow(close_pt,2) + pow(close_pt,2)-2*close_pt*close_pt*cos(ang)); 	// Also can be 2*close_pt^2(1-cos(ang)) or 2*close_pt*sin(ang/2) (chord len)
+							if(dist > 1.5*veh_det_width){
+								in_angle = true; 
+							}
+						}
+						else{break;}
+						offset++;
+					} 
+					// std::cout << "Done Left Side." << std::endl;
+					// Then right side
+					in_angle = false;
+					offset = 1;
+					// std::cout << "Starting Right Side... " << std::endl;
+					while(!in_angle){
+						// Make sure offset point is still valid
+						if(i+offset < end_i && i+offset < ranges.size()){
+							// Only change larger ranges
+							if(ranges[i+offset] > close_pt){
+								// std::cout << "Extended R!" << std::endl;
+								proc_ranges[i+offset] = close_pt;
+							}
+							// Exit if the total distance is larger than the required angle
+							// std::cout << "Checking Distance R..." << std::endl;
+							double ang = std::abs(lidar_angles[i]-lidar_angles[i+offset]);
+							double dist = sqrt(pow(close_pt,2) + pow(close_pt,2)-2*close_pt*close_pt*cos(ang)); 	// Also can be 2*close_pt^2(1-cos(ang)) or 2*close_pt*sin(ang/2) (chord len)
+							if(dist > 1.5*veh_det_width){
+								in_angle = true; 
+							}
+						}
+						else{break;}
+						offset++;
+					} 
+					// std::cout << "Done Left Side." << std::endl;
+				}
+			}
+			// std::cout << "Done Extending." << std::endl;
+			return proc_ranges;
+		}
+
+		std::pair<int, int> get_right_left_indices(std::vector<float> ranges, std::vector<double> lidar_angles){
+			left_ind_MPC = 0; right_ind_MPC = 0;
+			// Gets the indices of the left and right scan angles
+			for(int i =0; i < ranges.size(); ++i){
+				if(lidar_angles[i] <= right_beam_angle_MPC) right_ind_MPC +=1;
+				if(lidar_angles[i] <= left_beam_angle_MPC) left_ind_MPC +=1;
+			}
+			left_ind_MPC -=1;
+			return std::make_pair(right_ind_MPC, left_ind_MPC);
+		}
 
 		std::vector<float> preprocess_lidar_MPC(std::vector<float> ranges, std::vector<double> lidar_angles){
-			left_ind_MPC = 0; right_ind_MPC = 0;
 			//sets distance to zero for obstacles in safe distance, and max_lidar_range for those that are far.
+
+			std::pair<int, int> indices = get_right_left_indices(ranges, lidar_angles);
+
+			// Extend disparities ahead of vehicle 
+			ranges = extend_disparities(indices.first, indices.second, ranges, lidar_angles);
+
 			int num_det=0;
 			double safe_dist=safe_distance_adapt;
 			std::vector<float> ranges1=ranges;
 			while(num_det==0){
 				num_det=0;
-				left_ind_MPC = 0; right_ind_MPC = 0;
 				ranges=ranges1;
 				if(safe_dist<0.1){
 					num_det=1;
-					for(int i =0; i < ranges.size(); ++i){
-						if(lidar_angles[i] <= right_beam_angle_MPC) right_ind_MPC +=1;
-						if(lidar_angles[i] <= left_beam_angle_MPC) left_ind_MPC +=1;
-					}
-					left_ind_MPC +=1;
 				}
 				else{
-					for(int i =0; i < ranges.size(); ++i){
-						if(lidar_angles[i] <= right_beam_angle_MPC) right_ind_MPC +=1;
-						if(lidar_angles[i] <= left_beam_angle_MPC) left_ind_MPC +=1;
-						if(right_ind_MPC!=i+1 && left_ind_MPC==i+1){
-							if(ranges[i] <= safe_dist) {ranges[i] = 0;}
-							else if(ranges[i] > max_lidar_range) {ranges[i] = max_lidar_range; num_det++;}
-							else{num_det++;}
-						}
-						
+					for(int i =indices.first; i < indices.second; ++i){
+						if(ranges[i] <= safe_dist) {ranges[i] = 0;}
+						else if(ranges[i] > max_lidar_range) {ranges[i] = max_lidar_range; num_det++;}
+						else{num_det++;}
 					}
 				}
 				safe_dist=safe_dist/2;
 			}
-			left_ind_MPC -=1;
+
+
 			return ranges;
 			
 		}
@@ -2241,6 +2314,8 @@ class GapBarrier
 				double xpt=0, ypt=0; //Reference point for future LIDAR calculations with same original LIDAR scan
 				double theta_ref=0; //New reference theta for the LIDAR angles to be appropriately rotated so this angle is reference 0 
 
+				std::vector<float> processed_ranges_1;
+				std::vector<double> processed_lidar_1; 
 				int str_indx_1=0, end_indx_1=0, str_indx_2=0, end_indx_2=0;
 				int init_start_ang_tform = 0;
 				int init_end_ang_tform = 0;
@@ -2405,6 +2480,7 @@ class GapBarrier
 					}
 
 					std::vector<float> proc_ranges_MPC = preprocess_lidar_MPC(fused_ranges_MPC_tot,lidar_transform_angles_tot);
+
 					
 					int str_indx_MPC, end_indx_MPC; double heading_angle_MPC;
 					heading_angle_MPC=find_missing_scan_gap_MPC(lidar_transform_angles_tot);
@@ -2412,6 +2488,10 @@ class GapBarrier
 					
 					if(heading_angle_MPC==5 || num_MPC==0){ //Use the other method to find the heading angle (if gap is large enough, use this prior value)
 						if(num_MPC == 0){
+							processed_ranges_1 = proc_ranges_MPC;
+							processed_lidar_1 = lidar_transform_angles_tot;
+
+
 							// First heading
 							// 	First find largest spree of non-zero processed LiDAR scans ahead of the vehicle
 							std::pair<int,int> max_gap_MPC = find_max_gap_MPC(right_ind_MPC, left_ind_MPC, proc_ranges_MPC,lidar_transform_angles_tot);
@@ -2831,9 +2911,9 @@ class GapBarrier
 				obst.lifetime = ros::Duration(0.1);
 				geometry_msgs::Point p9;
 				obst.points.clear();
-				for(int i=0; i<fused_ranges_MPC_tot0.size(); i++){
-					p9.x = fused_ranges_MPC_tot0[i]*cos(lidar_transform_angles_tot0[i]); 
-					p9.y = fused_ranges_MPC_tot0[i]*sin(lidar_transform_angles_tot0[i]); 
+				for(int i=0; i<processed_ranges_1.size(); i++){
+					p9.x = processed_ranges_1[i]*cos(processed_lidar_1[i]); 
+					p9.y = processed_ranges_1[i]*sin(processed_lidar_1[i]); 
 					p9.z = 0;
 					obst.points.push_back(p9);
 				}
