@@ -126,9 +126,7 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 	double y2=xopt[1][2];
 	double potfield_factor=xopt[0][3];
 	double vel_factor=xopt[1][3];
-	double max_jump_x=xopt[0][4];
-	double max_jump_y=xopt[1][4];
-	int num_param_pairs = 5;
+	int num_param_pairs = 4;
 	std::vector<std::vector<double>> bez_curv;
 	//Optimization variables:
 	//[0] -> x2
@@ -192,15 +190,6 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 				
 		
 	}
-
-	// // Additional objective term favoring bezier curve final point proximity to lookahead point
-	// double dist = sqrt(pow(max_jump_x - x[3],2)+pow(max_jump_y-x[4],2));
-	// funcreturn = funcreturn + (vel_factor*dist);// Sum of reciprocal squared velocities 
-	// if(grad){
-	// // M_x2,x3,y3 = 0
-	// /*M_x4*/	grad[3]=grad[3]+(vel_factor/dist)*(x[3]-max_jump_x);
-	// /*M_y4*/	grad[4]=grad[4]+(vel_factor/dist)*(x[4]-max_jump_y);
-	// }
 
 	return funcreturn;
 }
@@ -521,12 +510,8 @@ class GapBarrier
 		ros::Publisher lidar_pub;
 		ros::Publisher marker_pub;
 		ros::Publisher mpc_marker_pub;
-		ros::Publisher wall_marker_pub;
-		ros::Publisher lobs;
-		ros::Publisher robs;
 		ros::Publisher obst_mark;
 		ros::Publisher scan_gap;
-		ros::Publisher jump;
 		ros::Publisher bez_mark;
 		ros::Publisher bez_guess_mark;
 		ros::Publisher vehicle_detect;
@@ -570,12 +555,8 @@ class GapBarrier
 		//markers
 		visualization_msgs::Marker marker;
 		visualization_msgs::Marker mpc_marker;
-		visualization_msgs::Marker wall_marker;
-		visualization_msgs::Marker lobs_marker;
-		visualization_msgs::Marker robs_marker;
 		visualization_msgs::Marker obst;
 		visualization_msgs::Marker scan_gap_marker;
-		visualization_msgs::Marker jump_marker;
 		visualization_msgs::Marker bez;
 		visualization_msgs::Marker bez_guess;
 		visualization_msgs::Marker vehicle_detect_path;
@@ -918,12 +899,8 @@ class GapBarrier
 			//lidar_pub = nf.advertise<std_msgs::Int32MultiArray>("chatter", 1000);
 			marker_pub = nf.advertise<visualization_msgs::Marker>("wall_markers",2);
 			mpc_marker_pub = nf.advertise<visualization_msgs::Marker>("mpc_markers",2);
-			wall_marker_pub=nf.advertise<visualization_msgs::Marker>("walls",2);
-			lobs=nf.advertise<visualization_msgs::Marker>("lobs",2);
-			robs=nf.advertise<visualization_msgs::Marker>("robs",2);
 			obst_mark=nf.advertise<visualization_msgs::Marker>("obst",2);
 			scan_gap=nf.advertise<visualization_msgs::Marker>("scan_gap",2);
-			jump=nf.advertise<visualization_msgs::Marker>("jump",2);
 			bez_mark=nf.advertise<visualization_msgs::Marker>("bez",2);
 			bez_guess_mark=nf.advertise<visualization_msgs::Marker>("bez_guess",2);
 			vehicle_detect=nf.advertise<visualization_msgs::Marker>("vehicle_detect",2);
@@ -1934,45 +1911,48 @@ class GapBarrier
 
 
 		double find_best_point_MPC(std::pair<double, double> ran_ang, int start_i, int end_i, std::vector<float> proc_ranges, std::vector<double> lidar_transform_angles){
-			
+			// Finds the best heading direction for MPC iterations beyond the first
+			// ran_ang: the angle and range of this MPC point relative to the vehicle's current position
+			// start_i, end_i: indices in given scan to search for the best heading
+			// proc_ranges, lidar_transform_angles: preprocessed lidar range data and lidar angles transformed to this frame
 			double best_heading = 0;
 
-			// Finds the max arc length jump in the scan data
-			double max_arc = 0;
-			int max_idx;
-			for(int i =start_i; i < end_i; ++i){
-				// Get jump between this index and next
-				double far_pt = (proc_ranges[i] > proc_ranges[i+1]) ? proc_ranges[i] : proc_ranges[i+1];
-				double ang = std::abs(lidar_transform_angles[i]-lidar_transform_angles[i+1]);
-				double arc = far_pt*ang;
-				// Compare with max
-				if (arc > max_arc){
-					//std::cout << "Arc of " << arc << " at index " << i <<std::endl;
-					max_arc = arc;
-					max_idx = i;
-				} 
-			}
+			// // Finds the max distance jump in the scan data
+			// double max_arc = 0;
+			// int max_idx=0;
+			// for(int i =start_i; i < end_i; ++i){
+			// 	// Get jump between this index and next
+			// 	double close_pt = (proc_ranges[i] < proc_ranges[i+1]) ? proc_ranges[i] : proc_ranges[i+1];
+			// 	double ang = std::abs(lidar_transform_angles[i]-lidar_transform_angles[i+1]);
+			// 	// Distance using law of cosines
+			// 	double arc = sqrt(pow(close_pt,2) + pow(close_pt,2)-2*close_pt*close_pt*cos(ang));
+			// 	// Compare with max
+			// 	if (arc > max_arc){
+			// 		std::cout << "Arc of " << arc << " at index " << i <<std::endl;
+			// 		max_arc = arc;
+			// 		max_idx = i;
+			// 	} 
+			// }
 		
-			// Arc is big enough
-			if (max_arc >= veh_det_width){
-				// nav to middle of arc
-				best_heading = (lidar_transform_angles[max_idx]+lidar_transform_angles[max_idx+1])/2;
-				return best_heading;
-			}
+			// // Arc is big enough
+			// if (max_arc >= veh_det_width){
+			// 	// nav to middle of arc
+			// 	best_heading = (lidar_transform_angles[max_idx]+lidar_transform_angles[max_idx+1])/2;
+			// 	return best_heading;
+			// }
 
-			// No arc/jump found, go to the furthest point in the scan gap instead 
+			// Navigate to the furthest point in the scan gap that ends up ahead of the vehicle 
 			double max_range = 0;
 			for(int i=start_i; i<=end_i; ++i){
 				if(proc_ranges[i] > max_range){
 					// Check if range meets criteria of not ending behind the vehicle
 					double ang = lidar_transform_angles[i];
-					// Angle condition
+					// Angle condition (Past 90 deg left or right from vehicle's frame)
 					if(ang > (M_PI_2-ran_ang.second) || ang < (-M_PI_2-ran_ang.second)){
-						// Range condition
-						double r;
-						if(ang < 0){r=ran_ang.first*cos(ran_ang.second)/sin(ang-(M_PI_2-ran_ang.second));}
-						else{r=ran_ang.first*cos(ran_ang.second)/sin(ang-(-M_PI_2-ran_ang.second));}
-						
+						// Get range based on whether the angle is positive or negative
+						double theta = (ang < 0) ? (M_PI_2-ran_ang.second) : (-M_PI_2-ran_ang.second);
+						double r = ran_ang.first*cos(ran_ang.second)/sin(ang-theta);
+						// Range condition (Distance does not extend to behind vehicle)
 						if(proc_ranges[i] < r){
 							max_range = proc_ranges[i];
 							best_heading = ang;
@@ -1987,32 +1967,6 @@ class GapBarrier
 
 			return best_heading; 
 		}
-
-
-		int find_max_jump(int start_i, int end_i, std::vector<float> ranges, std::vector<double> angles){
-			// Finds the largest jump in scan data, then returns the point in the center of that jump.
-			double max_jump = 0;	// Size of jump
-			int max_idx = 0;		// Index of start of jump
-			double jump = 0;
-
-			// Only look ahead of the vehicle
-			for(int i =start_i; i < end_i; ++i){
-				// Get jump between this index and next
-				jump = std::abs(ranges[i]-ranges[i+1]);
-				// Compare with max
-				if (jump > max_jump){
-					max_jump = jump;
-					max_idx = i;
-				} 
-			}
-
-			// Jump is too small
-			if (max_jump < 2*veh_det_width){
-				return -1; 
-			}
-			return max_idx;
-		}
-
 		
 
 		void visualize_detections(){
@@ -2287,8 +2241,6 @@ class GapBarrier
 				double xpt=0, ypt=0; //Reference point for future LIDAR calculations with same original LIDAR scan
 				double theta_ref=0; //New reference theta for the LIDAR angles to be appropriately rotated so this angle is reference 0 
 
-				std::vector<std::vector<double>> obstacle_points_l;
-				std::vector<std::vector<double>> obstacle_points_r;
 				int str_indx_1=0, end_indx_1=0, str_indx_2=0, end_indx_2=0;
 				int init_start_ang_tform = 0;
 				int init_end_ang_tform = 0;
@@ -2460,23 +2412,24 @@ class GapBarrier
 					
 					if(heading_angle_MPC==5 || num_MPC==0){ //Use the other method to find the heading angle (if gap is large enough, use this prior value)
 						if(num_MPC == 0){
+							// First heading
+							// 	First find largest spree of non-zero processed LiDAR scans ahead of the vehicle
 							std::pair<int,int> max_gap_MPC = find_max_gap_MPC(right_ind_MPC, left_ind_MPC, proc_ranges_MPC,lidar_transform_angles_tot);
 							str_indx_MPC = max_gap_MPC.first; end_indx_MPC = max_gap_MPC.second;
+							// Then, find the direction of the midpoint of line between the leftmost and rightmost point in the gap
 							double r1 = proc_ranges_MPC[str_indx_MPC]; 				double r2 = proc_ranges_MPC[end_indx_MPC];
 							double a1 = lidar_transform_angles_tot[str_indx_MPC]; 	double a2 = lidar_transform_angles_tot[end_indx_MPC];
 							heading_angle_MPC = atan2(0.5*(r1*sin(a1)+r2*sin(a2)), 0.5*(r1*cos(a1)+r2*cos(a2)));
-
-							// heading_angle_MPC = (lidar_transform_angles_tot[str_indx_MPC]+lidar_transform_angles_tot[end_indx_MPC])/2;
-
-							std::cout << "Heading 1 Between " << lidar_transform_angles_tot[str_indx_MPC]*180/M_PI << " and " << lidar_transform_angles_tot[end_indx_MPC]*180/M_PI <<std::endl;
+							// std::cout << "Heading 1 Between " << lidar_transform_angles_tot[str_indx_MPC]*180/M_PI << " and " << lidar_transform_angles_tot[end_indx_MPC]*180/M_PI <<std::endl;
 							// std::cout << "Heading 1: " << heading_angle_MPC*180/M_PI <<std::endl;
 
 							str_indx_1 = str_indx_MPC;
 							end_indx_1 = end_indx_MPC;
 						}
 						else{
+							// Subsequent Headings
+							// 	Get indices of LiDAR scans at left and right side of the scan gap in the car's initial frame of reference, transformed to this frame
 							str_indx_MPC = init_start_ang_tform; end_indx_MPC = init_end_ang_tform;
-							// Pass in the angle and range of the MPC of the vehicle (Will need to change for multiple MPC points)
 							// Use angles from initial widest gap of vehicle
 							heading_angle_MPC= find_best_point_MPC(first_MPC, init_start_ang_tform, init_end_ang_tform, proc_ranges_MPC,lidar_transform_angles_tot);
 							// std::cout << "Heading 2 Between " << lidar_transform_angles_tot[init_start_ang_tform]*180/M_PI << " and " << lidar_transform_angles_tot[init_end_ang_tform]*180/M_PI <<std::endl;
@@ -2488,119 +2441,6 @@ class GapBarrier
 
 						heading_angle = heading_angle_MPC;
 
-						if(num_MPC==0){
-					
-							float mod_angle_al_MPC = angle_al-M_PI + heading_angle_MPC;
-
-							if(mod_angle_al_MPC > M_PI) mod_angle_al_MPC -= 2*M_PI;
-							else if (mod_angle_al_MPC < -M_PI) mod_angle_al_MPC += 2*M_PI;
-
-							float mod_angle_br_MPC = angle_br-M_PI + heading_angle_MPC;
-
-							if(mod_angle_br_MPC > M_PI) mod_angle_br_MPC -= 2*M_PI;
-							else if (mod_angle_br_MPC < -M_PI) mod_angle_br_MPC += 2*M_PI;
-
-							float mod_angle_ar_MPC = angle_ar-M_PI + heading_angle_MPC;
-
-							if(mod_angle_ar_MPC > M_PI) mod_angle_ar_MPC -= 2*M_PI;
-							else if (mod_angle_ar_MPC < -M_PI) mod_angle_ar_MPC += 2*M_PI;
-
-							float mod_angle_bl_MPC = angle_bl-M_PI + heading_angle_MPC;
-
-							if(mod_angle_bl_MPC > M_PI) mod_angle_bl_MPC -= 2*M_PI;
-							else if (mod_angle_bl_MPC < -M_PI) mod_angle_bl_MPC += 2*M_PI;
-
-							int start_indx_l_MPC=0, start_indx_r_MPC=0, end_indx_l_MPC=0, end_indx_r_MPC=0;
-
-							for (int w=0;w<fused_ranges_MPC_tot.size();w++){
-							
-								if(lidar_transform_angles_tot[w] <= mod_angle_br_MPC) start_indx_r_MPC +=1;
-								if(lidar_transform_angles_tot[w] <= mod_angle_ar_MPC) end_indx_r_MPC +=1;
-								if (lidar_transform_angles_tot[w] <= mod_angle_bl_MPC) end_indx_l_MPC +=1;
-								if (lidar_transform_angles_tot[w] <= mod_angle_al_MPC) start_indx_l_MPC +=1;
-							}
-							end_indx_r_MPC-=1; //We overcounted by one past the end range for both left and right
-							end_indx_l_MPC-=1;
-
-							std::vector<std::vector<double>> obstacle_points_l_MPC;
-							obstacle_points_l_MPC.push_back({0, max_lidar_range_opt});
-							obstacle_points_l_MPC.push_back({1, max_lidar_range_opt}); 
-							
-							
-							std::vector<std::vector<double>> obstacle_points_r_MPC;
-							obstacle_points_r_MPC.push_back({0, -max_lidar_range_opt});
-							obstacle_points_r_MPC.push_back({1, -max_lidar_range_opt});
-							
-							int num_left_pts = end_indx_l_MPC-start_indx_l_MPC+1; int num_right_pts = end_indx_r_MPC-start_indx_r_MPC+1;
-							if (num_left_pts<=0) num_left_pts+=scan_beams;
-							if (num_right_pts<=0) num_right_pts+=scan_beams;
-							double left_step=num_left_pts, right_step=num_right_pts;
-							if(num_left_pts>n_pts_l) num_left_pts = n_pts_l;
-							if(num_right_pts>n_pts_r) num_right_pts = n_pts_r;
-							left_step=left_step/n_pts_l, right_step=right_step/n_pts_r;
-							if(left_step<1) left_step=1;
-							if(right_step<1) right_step=1;
-
-
-							int k_obs = 0; int obs_index;
-
-							double x_obs, y_obs;
-
-							for(int k = 0; k < num_left_pts; ++k){
-								obs_index = (start_indx_l_MPC + (int)(k*left_step)) % fused_ranges_MPC_tot.size();
-
-								double obs_range = static_cast<double>(fused_ranges_MPC_tot[obs_index]);
-								
-
-								if(obs_range <= max_lidar_range_opt){
-
-
-									if(k_obs == 0){
-										obstacle_points_l_MPC[0] = {obs_range*cos(lidar_transform_angles_tot[obs_index]), obs_range*sin(lidar_transform_angles_tot[obs_index]) };
-									}
-									else if (k_obs == 1){
-										obstacle_points_l_MPC[1] = {obs_range*cos(lidar_transform_angles_tot[obs_index]), obs_range*sin(lidar_transform_angles_tot[obs_index]) };
-									}
-									else{
-										x_obs = obs_range*cos(lidar_transform_angles_tot[obs_index]);
-										y_obs = obs_range*sin(lidar_transform_angles_tot[obs_index]);
-										
-										std::vector<double> obstacles = {x_obs, y_obs};
-										obstacle_points_l_MPC.push_back(obstacles);
-									}
-									k_obs+=1;
-								}
-
-							}
-							k_obs = 0;
-							
-							
-							for(int k = 0; k < num_right_pts; ++k){
-								obs_index = (start_indx_r_MPC + (int)(k*right_step)) % fused_ranges_MPC_tot.size();
-								double obs_range = static_cast<double>(fused_ranges_MPC_tot[obs_index]);
-
-								if(obs_range <= max_lidar_range_opt) {
-									if(k_obs == 0){
-										obstacle_points_r_MPC[0] = {obs_range*cos(lidar_transform_angles_tot[obs_index]), obs_range*sin(lidar_transform_angles_tot[obs_index])};
-									}
-									else if(k_obs == 1){
-										obstacle_points_r_MPC[1] = {obs_range*cos(lidar_transform_angles_tot[obs_index]),obs_range*sin(lidar_transform_angles_tot[obs_index])};
-									}
-									else{
-										x_obs = obs_range*cos(lidar_transform_angles_tot[obs_index]);
-										y_obs = obs_range*sin(lidar_transform_angles_tot[obs_index]);
-										
-
-										std::vector<double> obstacles = {x_obs, y_obs};
-										obstacle_points_r_MPC.push_back(obstacles);
-										
-									}
-									
-									k_obs += 1;
-								}
-							}
-							obstacle_points_l=obstacle_points_l_MPC, obstacle_points_r=obstacle_points_r_MPC;
-						}
 					}
 
 					// Find the closest index to the heading angle
@@ -2651,7 +2491,7 @@ class GapBarrier
 					first_MPC.first = sqrt(pow(xpt, 2) + pow(ypt, 2));
 					first_MPC.second = theta_ref;
 					// If the xpt is less than safe distance... there's likely a dead end ahead of us and we should back up/turn around
-					if(num_MPC == 0 && xpt <= safe_distance_adapt){std::cout << "Back Up!!" <<std::endl;}
+					if(num_MPC == 0 && obst_ahead_dist <= safe_distance_adapt){std::cout << "Back Up!!" <<std::endl;}
 					
 					xptplot[num_MPC]=xpt;
 					yptplot[num_MPC]=ypt;
@@ -2701,45 +2541,6 @@ class GapBarrier
 				// Outputs: fused_ranges_MPC_tot0, lidar_transform_angles_tot0
 				// printf("fused_ranges size: %d\n",fused_ranges_MPC_tot0.size());
 				// printf("transform_angles size: %d\n",lidar_transform_angles_tot0.size());
-
-				// Maybe change the start and end indices for this calculation to be the ones from the first preprocessed lidar scan
-				int max_jump_idx = find_max_jump(str_indx_1, end_indx_1, fused_ranges_MPC_tot0,lidar_transform_angles_tot0);
-
-				std::vector<double> max_jump_start = {1, -.1};
-				std::vector<double> max_jump_end   = {1, 0.1};
-				std::vector<double> max_jump_point = {1, 0};
-				if (max_jump_idx != -1){
-					max_jump_start = {fused_ranges_MPC_tot0[max_jump_idx]*cos(lidar_transform_angles_tot0[max_jump_idx]), fused_ranges_MPC_tot0[max_jump_idx]*sin(lidar_transform_angles_tot0[max_jump_idx])};
-					max_jump_end   = {fused_ranges_MPC_tot0[max_jump_idx+1]*cos(lidar_transform_angles_tot0[max_jump_idx+1]), fused_ranges_MPC_tot0[max_jump_idx+1]*sin(lidar_transform_angles_tot0[max_jump_idx+1])};
-					max_jump_point = {(max_jump_start[0] + max_jump_end[0])/2, (max_jump_start[1] + max_jump_end[1])/2};
-				}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -2812,14 +2613,13 @@ class GapBarrier
 
 				std::vector<double> opt_params1;
 				std::vector<double> opt_params2;
-				int num_param_pairs_1 = 5;
+				int num_param_pairs_1 = 4;
 				int num_param_pairs_2 = 9;
 
 				opt_params1.push_back(num_obs+num_param_pairs_1); 	opt_params1.push_back(bez_ctrl_pts); 
 				opt_params1.push_back(bez_curv_pts); 				opt_params1.push_back(bez_alpha); 
 				opt_params1.push_back(bez_x1); 						opt_params1.push_back(bez_y2);
 				opt_params1.push_back(pot_field_factor_F_QBMPC); 	opt_params1.push_back(velocity_factor_F_QBMPC); 
-				opt_params1.push_back(max_jump_point[0]); 			opt_params1.push_back(max_jump_point[1]); 
 
 				opt_params2.push_back(num_obs+num_param_pairs_2); opt_params2.push_back(bez_ctrl_pts); 
 				opt_params2.push_back(bez_curv_pts); 		opt_params2.push_back(bez_beta); 
@@ -2855,9 +2655,6 @@ class GapBarrier
 				init_guess[2]=std::min(std::max(-max_lidar_range+1e-6,yptplot[0]),max_lidar_range-1e-6); //y3
 				init_guess[3]=std::min(std::max(-max_lidar_range+1e-6,xptplot[1]),max_lidar_range-1e-6); //x4
 				init_guess[4]=std::min(std::max(-max_lidar_range+1e-6,yptplot[1]),max_lidar_range-1e-6); //y4
-				// Try lookahead point for initial guess 
-				// init_guess[3]=std::min(std::max(-max_lidar_range+1e-6,max_jump_point[0]),max_lidar_range-1e-6); //x4
-				// init_guess[4]=std::min(std::max(-max_lidar_range+1e-6,max_jump_point[1]),max_lidar_range-1e-6); //y4
 
 				double x[bez_ctrl_pts*2-5];
 				x[0]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
@@ -2865,8 +2662,7 @@ class GapBarrier
 				x[2]=std::min(std::max(-max_lidar_range+1e-6,yptplot[0]),max_lidar_range-1e-6); //y3
 				x[3]=std::min(std::max(-max_lidar_range+1e-6,xptplot[1]),max_lidar_range-1e-6); //x4
 				x[4]=std::min(std::max(-max_lidar_range+1e-6,yptplot[1]),max_lidar_range-1e-6); //y4
-				// x[3]=std::min(std::max(-max_lidar_range+1e-6,max_jump_point[0]),max_lidar_range-1e-6); //x4
-				// x[4]=std::min(std::max(-max_lidar_range+1e-6,max_jump_point[1]),max_lidar_range-1e-6); //y4
+
 
 				int successful_opt=0;
 
@@ -3015,72 +2811,6 @@ class GapBarrier
 				mpc_marker_pub.publish(mpc_marker);
 
 
-				//Publish the left obstacle points
-				lobs_marker.header.frame_id = base_frame;
-				lobs_marker.header.stamp = ros::Time::now();
-				lobs_marker.type = visualization_msgs::Marker::LINE_LIST;
-				lobs_marker.id = 0; 
-				lobs_marker.action = visualization_msgs::Marker::ADD;
-				lobs_marker.scale.x = 0.1;
-				lobs_marker.color.a = 1.0;
-				lobs_marker.color.r = 0; 
-				lobs_marker.color.g = 0.5;
-				lobs_marker.color.b = 0.5;
-				lobs_marker.pose.orientation.w = 1;
-				
-				lobs_marker.lifetime = ros::Duration(0.1);
-				geometry_msgs::Point p3;
-				lobs_marker.points.clear();
-				int count=0;
-				for(int i=0;i<obstacle_points_l.size();i++){
-					double po1=obstacle_points_l[i][0];
-					double po2=obstacle_points_l[i][1];
-					p3.x = po1;	p3.y = po2;	p3.z = 0;
-					lobs_marker.points.push_back(p3);	
-					count++;
-				}
-				if(count%2==1){
-					p3.x = 0;	p3.y = 0;	p3.z = 0; 
-					lobs_marker.points.push_back(p3);
-				}
-
-				lobs.publish(lobs_marker);
-
-				//Publish the right obstacle points
-				robs_marker.header.frame_id = base_frame;
-				robs_marker.header.stamp = ros::Time::now();
-				robs_marker.type = visualization_msgs::Marker::LINE_LIST;
-				robs_marker.id = 0; 
-				robs_marker.action = visualization_msgs::Marker::ADD;
-				robs_marker.scale.x = 0.1;
-				robs_marker.color.a = 1.0;
-				robs_marker.color.r = 0; 
-				robs_marker.color.g = 0;
-				robs_marker.color.b = 1;
-				robs_marker.pose.orientation.w = 1;
-				
-				robs_marker.lifetime = ros::Duration(0.1);
-
-				geometry_msgs::Point p4;
-				robs_marker.points.clear();
-				
-				count=0;
-				for(int i=0;i<obstacle_points_r.size();i++){
-					double po1=obstacle_points_r[i][0];
-					double po2=obstacle_points_r[i][1];
-					p4.x = po1;	p4.y = po2;	p4.z = 0;
-				
-					robs_marker.points.push_back(p4);	
-					count++;
-				}
-				if(count%2==1){
-					p4.x = 0;	p4.y = 0;	p4.z = 0; 
-					robs_marker.points.push_back(p4);
-				}
-
-				robs.publish(robs_marker);
-
-
 				//Publish the lidar ranges and angles as points
 				obst.header.frame_id = base_frame;
 				obst.header.stamp = ros::Time::now();
@@ -3162,33 +2892,6 @@ class GapBarrier
 
 
 				scan_gap.publish(scan_gap_marker);
-
-
-				//Publish the largest jump
-				jump_marker.header.frame_id = base_frame;
-				jump_marker.header.stamp = ros::Time::now();
-				jump_marker.type = visualization_msgs::Marker::LINE_LIST;
-				jump_marker.id = 0; 
-				jump_marker.action = visualization_msgs::Marker::ADD;
-				jump_marker.scale.x = 0.1;
-				jump_marker.color.a = 1.0;
-				jump_marker.color.r = 1; 
-				jump_marker.color.g = 0;
-				jump_marker.color.b = 1;
-				jump_marker.pose.orientation.w = 1;
-				
-				jump_marker.lifetime = ros::Duration(0.1);
-
-				geometry_msgs::Point p7;
-				jump_marker.points.clear();
-				
-				p7.x = max_jump_start[0];	p7.y = max_jump_start[1];	p7.z = 0;
-				jump_marker.points.push_back(p7); 	// First point in left obstacles
-
-				p7.x = max_jump_end[0];	p7.y = max_jump_end[1];	p7.z = 0;
-				jump_marker.points.push_back(p7); 	// Last point in right obstacles
-
-				jump.publish(jump_marker);
 
 
 				//Publish the initial bezier curve guess
