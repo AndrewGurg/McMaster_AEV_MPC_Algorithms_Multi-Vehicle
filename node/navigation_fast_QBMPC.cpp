@@ -187,7 +187,18 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 		/*M_y4*/	grad[4]=grad[4]-(vel_factor/pow(vel2,2))*2*y_dot*pdy4;
 		}		
 
-				
+		// // Objective term favoring velocities near target
+		// double vel2 = pow(x_dot,2)+pow(y_dot,2);
+		// double vel = sqrt(vel2);
+		// double vel_target = 2.3;
+		// funcreturn=funcreturn + vel_factor*pow((vel-vel_target),2);// Sum of reciprocal squared velocities 
+		// if(grad){
+		// /*M_x2*/	grad[0]=grad[0]+vel_factor*(2*x_dot*pdx2)*(1-vel*vel_target);
+		// /*M_x3*/	grad[1]=grad[1]+vel_factor*(2*x_dot*pdx3)*(1-vel*vel_target);
+		// /*M_y3*/	grad[2]=grad[2]+vel_factor*(2*y_dot*pdy3)*(1-vel*vel_target);
+		// /*M_x4*/	grad[3]=grad[3]+vel_factor*(2*x_dot*pdx4)*(1-vel*vel_target);
+		// /*M_y4*/	grad[4]=grad[4]+vel_factor*(2*y_dot*pdy4)*(1-vel*vel_target);
+		// }				
 		
 	}
 
@@ -725,7 +736,8 @@ class GapBarrier
 
 			// Get an external vehicle's frame prefix
 			if(tf_prefix != ""){
-				int ext_car_num = (tf_prefix[tf_prefix.find('/')-1] - '0') + 1;	// Add one to this cars number
+				int ego_num = tf_prefix[tf_prefix.find('/')-1] - '0';
+				int ext_car_num = (ego_num == 1) ? 2 : 1;	// Add or subtract one to this cars number
 				ext_prefix = "racecar" + std::to_string(ext_car_num) + "/";
 			}
 			else{
@@ -1837,7 +1849,7 @@ class GapBarrier
 							// Exit if the total distance is larger than the required angle
 							// std::cout << "Checking Distance L..." << std::endl;
 							double ang = std::abs(lidar_angles[i]-lidar_angles[i-offset]);
-							double dist = sqrt(pow(close_pt,2) + pow(close_pt,2)-2*close_pt*close_pt*cos(ang)); 	// Also can be 2*close_pt^2(1-cos(ang)) or 2*close_pt*sin(ang/2) (chord len)
+							double dist = 2*close_pt*sin(ang/2); 	// Chord Length
 							if(dist > 1.5*veh_det_width){
 								in_angle = true; 
 							}
@@ -1861,7 +1873,7 @@ class GapBarrier
 							// Exit if the total distance is larger than the required angle
 							// std::cout << "Checking Distance R..." << std::endl;
 							double ang = std::abs(lidar_angles[i]-lidar_angles[i+offset]);
-							double dist = sqrt(pow(close_pt,2) + pow(close_pt,2)-2*close_pt*close_pt*cos(ang)); 	// Also can be 2*close_pt^2(1-cos(ang)) or 2*close_pt*sin(ang/2) (chord len)
+							double dist = 2*close_pt*sin(ang/2); 	// Chord Length
 							if(dist > 1.5*veh_det_width){
 								in_angle = true; 
 							}
@@ -1891,18 +1903,21 @@ class GapBarrier
 			//sets distance to zero for obstacles in safe distance, and max_lidar_range for those that are far.
 
 			std::pair<int, int> indices = get_right_left_indices(ranges, lidar_angles);
-
+			int idx_inc_r = indices.first/10;
+			int idx_inc_l = (ranges.size()-indices.second)/10;
 			// Extend disparities ahead of vehicle 
 			ranges = extend_disparities(indices.first, indices.second, ranges, lidar_angles);
-
 			int num_det=0;
 			double safe_dist=safe_distance_adapt;
 			std::vector<float> ranges1=ranges;
 			while(num_det==0){
 				num_det=0;
 				ranges=ranges1;
-				if(safe_dist<0.1){
-					num_det=1;
+				// if(safe_dist<0.1){
+				// 	num_det=1;
+				// }
+				if(indices.first == 0 && indices.second == ranges.size()-1){
+					num_det = 1;
 				}
 				else{
 					for(int i =indices.first; i < indices.second; ++i){
@@ -1911,34 +1926,38 @@ class GapBarrier
 						else{num_det++;}
 					}
 				}
-				safe_dist=safe_dist/2;
+				//safe_dist=safe_dist/2;
+				// No safe distance detections found, look in a wider arc in front of vehicle for safe distances.
+				(indices.first-idx_inc_r >= 0) ? indices.first -= idx_inc_r : indices.first = 0;
+				(indices.second+idx_inc_l < ranges.size()) ? indices.second += idx_inc_l : indices.second = ranges.size()-1;
+				
 			}
 
-
+			right_ind_MPC = indices.first; left_ind_MPC = indices.second;
 			return ranges;
 			
 		}
 
 
-		double find_missing_scan_gap_MPC(std::vector<double> lidar_transform_angles){
+		double find_missing_scan_gap_MPC(std::vector<float> ranges, std::vector<double> lidar_transform_angles){
 			// Finds the largest difference in scan angles
 			// When predicted point is projected forward, the angles between lidar scans is changed
 			// Attempt to navigate to the center of a large gap since there is a large empty space in the scan data 
 			double best_heading=0;
 			double max_gap=0;
 			double start_gap=0;
-			for(int i=right_ind_MPC; i<=left_ind_MPC; ++i){
+			double end_gap=0;
+			for(int i=right_ind_MPC; i<=left_ind_MPC+1; ++i){
+				double close_pt = (ranges[i] < ranges[i-1]) ? ranges[i] : ranges[i-1];
+				double chord_len = 2*close_pt*sin((lidar_transform_angles[i]-lidar_transform_angles[i-1])/2);
 				if(lidar_transform_angles[i]-lidar_transform_angles[i-1]>max_gap){
-					max_gap=lidar_transform_angles[i]-lidar_transform_angles[i-1];
+					max_gap=chord_len;
 					start_gap=lidar_transform_angles[i-1];
+					end_gap = lidar_transform_angles[i];
 				}
 			}
-			if(lidar_transform_angles[left_ind_MPC+1]-lidar_transform_angles[left_ind_MPC]>max_gap){
-					max_gap=lidar_transform_angles[left_ind_MPC+1]-lidar_transform_angles[left_ind_MPC];
-					start_gap=lidar_transform_angles[left_ind_MPC];
-				}
-			if(max_gap>angle_thresh){ //What this does is find if the largest gap is too big to use the accurate averaging method to get heading
-				best_heading=start_gap+max_gap/2;
+			if(max_gap>1.5*veh_det_width){ //What this does is find if the largest gap is too big to use the accurate averaging method to get heading
+				best_heading=(start_gap+end_gap)/2;
 				missing_pts=1;
 			}
 			else{
@@ -2483,7 +2502,7 @@ class GapBarrier
 
 					
 					int str_indx_MPC, end_indx_MPC; double heading_angle_MPC;
-					heading_angle_MPC=find_missing_scan_gap_MPC(lidar_transform_angles_tot);
+					heading_angle_MPC=find_missing_scan_gap_MPC(proc_ranges_MPC, lidar_transform_angles_tot);
 					heading_angle=heading_angle_MPC;
 					
 					if(heading_angle_MPC==5 || num_MPC==0){ //Use the other method to find the heading angle (if gap is large enough, use this prior value)
@@ -2784,10 +2803,10 @@ class GapBarrier
 					bez_x4=x[3];
 					bez_y4=x[4];
 
-					// FILE *file1wq = fopen("/home/gjsk/1_opt_time.txt", "a");
+					// FILE *file1wq = fopen("/home/gjsk/opt_time_QBMPC_fast.txt", "a");
 					// fprintf(file1wq,"%lf\n",opt_time2-opt_time1);
 					// fclose(file1wq);
-					// FILE *file1wr = fopen("/home/gjsk/1_states.txt", "a");
+					// FILE *file1wr = fopen("/home/gjsk/states_QBMPC_fast.txt", "a");
 					// fprintf(file1wr,"%lf,%lf,%lf,%lf,%lf\n",opt_time2,locx,locy,last_delta,vel_adapt);
 					// fclose(file1wr);
 					printf("%lf, %lf\n",last_delta,vel_adapt);
