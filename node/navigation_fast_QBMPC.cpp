@@ -525,6 +525,9 @@ class GapBarrier
 		ros::Publisher scan_gap;
 		ros::Publisher bez_mark;
 		ros::Publisher bez_guess_mark;
+		ros::Publisher gplane_pub;
+		ros::Publisher gplane_pts_pub;
+		ros::Publisher gplane_adj_pub;
 		ros::Publisher vehicle_detect;
 		ros::Publisher driver_pub;
 		ros::Publisher cv_ranges_pub;
@@ -570,6 +573,9 @@ class GapBarrier
 		visualization_msgs::Marker scan_gap_marker;
 		visualization_msgs::Marker bez;
 		visualization_msgs::Marker bez_guess;
+		visualization_msgs::Marker gplane_marker;
+		visualization_msgs::Marker gplane_pts_marker;
+		visualization_msgs::Marker gplane_adj_marker;
 		visualization_msgs::Marker vehicle_detect_path;
 
 		//steering & stop time
@@ -915,6 +921,10 @@ class GapBarrier
 			scan_gap=nf.advertise<visualization_msgs::Marker>("scan_gap",2);
 			bez_mark=nf.advertise<visualization_msgs::Marker>("bez",2);
 			bez_guess_mark=nf.advertise<visualization_msgs::Marker>("bez_guess",2);
+			gplane_pub = nf.advertise<visualization_msgs::Marker>("gplane_marker",2);
+			gplane_pts_pub = nf.advertise<visualization_msgs::Marker>("gplane_pts_marker",2);
+			gplane_adj_pub = nf.advertise<visualization_msgs::Marker>("gplane_adj_marker",2);
+			vehicle_detect=nf.advertise<visualization_msgs::Marker>("vehicle_detect",2);
 			vehicle_detect=nf.advertise<visualization_msgs::Marker>("vehicle_detect",2);
 			driver_pub = nf.advertise<ackermann_msgs::AckermannDriveStamped>(drive_topic, 1);
 
@@ -1545,7 +1555,34 @@ class GapBarrier
 			result.A = dir.x, result.B=dir.y, result.C= dir.z;
 			result.D= -(dir.x*centroid.x + dir.y*centroid.y + dir.z*centroid.z);
 
+			//Publish groundplane
+			gplane_marker.header.frame_id = "camera_depth_optical_frame";
+			gplane_marker.header.stamp = ros::Time::now();
+			gplane_marker.type = visualization_msgs::Marker::CUBE;
+			gplane_marker.id = 0; 
+			gplane_marker.action = visualization_msgs::Marker::ADD;
+			gplane_marker.color.a = 1.0;
+			gplane_marker.color.r = 0.1; 
+			gplane_marker.color.g = 0.7;
+			gplane_marker.color.b = 0.3;
+			gplane_marker.pose.orientation.w = 1;
 
+			gplane_marker.scale.x = 1;  // Size of plane
+			gplane_marker.scale.y = 0.01;
+			gplane_marker.scale.z = 1;
+
+			gplane_marker.pose.position.x = centroid.x;
+			gplane_marker.pose.position.y = centroid.y;
+			gplane_marker.pose.position.z = centroid.z;
+
+			gplane_marker.pose.orientation.x = result.A;
+			gplane_marker.pose.orientation.y = result.B;
+			gplane_marker.pose.orientation.z = result.C;
+			gplane_marker.pose.orientation.w = 1;
+			
+			gplane_marker.lifetime = ros::Duration(0.1);
+
+			gplane_pub.publish(gplane_marker);
 			
 
 			//std::cout << "Ground Plane. " << "A= " << result.A << ". B= " <<result.B << ". C= " <<result.C << ". D= " <<result.D <<std::endl;
@@ -1554,6 +1591,28 @@ class GapBarrier
 
 		plane compute_groundplane(cv::Mat cv_image)
 		{
+
+			//Publish the groundplane points
+			gplane_pts_marker.header.frame_id = "camera_depth_optical_frame";
+			gplane_pts_marker.header.stamp = ros::Time::now();
+			gplane_pts_marker.type = visualization_msgs::Marker::POINTS;
+			gplane_pts_marker.id = 0; 
+			gplane_pts_marker.ns = "points";
+			gplane_pts_marker.action = visualization_msgs::Marker::ADD;
+			gplane_pts_marker.color.a = 1.0;
+			gplane_pts_marker.color.r = 0.7; 
+			gplane_pts_marker.color.g = 0.2;
+			gplane_pts_marker.color.b = 0.7;
+			gplane_pts_marker.pose.orientation.w = 1;
+
+			gplane_pts_marker.scale.x = 0.05;  // Size of points
+			gplane_pts_marker.scale.y = 0.05;
+			
+			gplane_pts_marker.lifetime = ros::Duration(0.1);
+			geometry_msgs::Point p6;
+			gplane_pts_marker.points.clear();
+
+
 			std::vector<float3> plane_points; //store all points close to the ground
 			for(int i=0 ; i < (int)cv_sample_cols_raw.size() ; i++)
 			{
@@ -1589,11 +1648,14 @@ class GapBarrier
 					{
 						//std::cout << "Adding Point to be part of ground plane fitting" << std::endl;
 						plane_points.push_back(temp);
+						p6.x = temp.x; p6.y = temp.y; p6.z = temp.z;
+						gplane_pts_marker.points.push_back(p6);
 					}
 				}
 			}
 
 			plane ground_plane=fit_groundplane(plane_points);
+			gplane_pts_pub.publish(gplane_pts_marker);
 			return ground_plane;
 
 
@@ -1629,6 +1691,27 @@ class GapBarrier
 
 		void augment_camera(std::vector<float> & lidar_ranges)
 		{
+			//Publish the points augmenting the lidar scan
+			gplane_adj_marker.header.frame_id = "laser";
+			gplane_adj_marker.header.stamp = ros::Time::now();
+			gplane_adj_marker.type = visualization_msgs::Marker::POINTS;
+			gplane_adj_marker.id = 0; 
+			gplane_adj_marker.ns = "points";
+			gplane_adj_marker.action = visualization_msgs::Marker::ADD;
+			gplane_adj_marker.color.a = 1.0;
+			gplane_adj_marker.color.r = 0.2; 
+			gplane_adj_marker.color.g = 0.7;
+			gplane_adj_marker.color.b = 0.7;
+			gplane_adj_marker.pose.orientation.w = 1;
+
+			gplane_adj_marker.scale.x = 0.05;  // Size of points
+			gplane_adj_marker.scale.y = 0.05;
+			
+			gplane_adj_marker.lifetime = ros::Duration(0.1);
+			geometry_msgs::Point p7;
+			gplane_adj_marker.points.clear();
+
+
 			cv::Mat cv_image=(cv_bridge::toCvCopy(cv_image_data,cv_image_data.encoding))->image; //Encoding type is 16UC1 (depth in mm)
 
 			plane ground= compute_groundplane(cv_image);
@@ -1710,12 +1793,18 @@ class GapBarrier
 
 					//3. Overwrite Lidar Points with Camera Points taking into account dif frames of ref
 
-					float lidar_coordx = (cv_coordz+cv_distance_to_lidar);
-                	float lidar_coordy = -cv_coordx;
+					float lidar_coordx = -(cv_coordz+cv_distance_to_lidar);
+                	float lidar_coordy = cv_coordx;
+					float lidar_coordz = -(cv_coordy+0.05);
 					float cv_range_temp = std::pow(std::pow(lidar_coordx,2) + std::pow(lidar_coordy,2),0.5);
 					//(coordx^2+coordy^2)^0.5
 
-					int beam_index= std::floor(scan_beams*std::atan2(lidar_coordy, lidar_coordx)/(2*M_PI));
+					p7.x = lidar_coordx; p7.y = lidar_coordy; p7.z = lidar_coordz;
+					gplane_adj_marker.points.push_back(p7);
+
+					// at 2pi to the angle for wraparound if atan2 returns negative
+					float angle = std::atan2(lidar_coordy, lidar_coordx) > 0 ?  std::atan2(lidar_coordy, lidar_coordx) :  std::atan2(lidar_coordy, lidar_coordx) + 2*M_PI;
+					int beam_index= std::floor(scan_beams*(angle)/(2*M_PI));
 					float lidar_range = lidar_ranges[beam_index];
 					lidar_ranges[beam_index] = std::min(lidar_range, cv_range_temp);
 				}
@@ -1726,7 +1815,8 @@ class GapBarrier
 			cv_ranges_msg.ranges=lidar_ranges;
 
 			cv_ranges_pub.publish(cv_ranges_msg);
-			
+
+			gplane_adj_pub.publish(gplane_adj_marker);
 
 		}
 
@@ -1905,10 +1995,6 @@ class GapBarrier
 			while(num_det==0){
 				num_det=0;
 				ranges=ranges1;
-				// if(safe_dist<0.1){
-				// 	num_det=1;
-				// }
-
 				
 				for(int i =indices.first; i < indices.second; ++i){
 					if(ranges[i] <= safe_dist) {ranges[i] = 0;}
@@ -2255,22 +2341,21 @@ class GapBarrier
 			timestamp_tf2=timestamp_tf1; timestamp_cam2=timestamp_cam1;
 			visualize_detections(); //PLot the detections in rviz regardless of if we are in autonomous mode or not
 
+
+			std::vector<float> fused_ranges = data->ranges;
+			if(use_camera)
+			{
+				if(cv_image_data_defined){ augment_camera(fused_ranges); }
+			}
+
+
+
 			if (!nav_active ||(use_map && !map_saved)) { //Don't start navigation until map is saved if that's what we're using
 				drive_state = "normal";
 				return;
 			}
-			
-
-
-
-			std::vector<float> fused_ranges = data->ranges;
-			// if(use_camera)
-			// {
-			// 	if(cv_image_data_defined){ augment_camera(fused_ranges); }
-			// }
 		
 			
-
 			int sec_len = int(heading_beam_angle/data->angle_increment);
 
 			double min_distance, velocity_scale, delta_d;
@@ -2444,9 +2529,9 @@ class GapBarrier
 								smallestdist=fused_ranges_MPC[i];
 							}
 						}
-						// FILE *file1w = fopen("/home/gjsk/1_closest_ob.txt", "a");
-						// fprintf(file1w,"%lf\n",smallestdist);
-						// fclose(file1w);
+						FILE *file1w = fopen("/home/gjsk/catkin_ws/Sim_Data/closest_ob_QBMPC_fast.txt", "a");
+						fprintf(file1w,"%lf\n",smallestdist);
+						fclose(file1w);
 						
 					}
 
@@ -2772,12 +2857,12 @@ class GapBarrier
 					bez_x4=x[3];
 					bez_y4=x[4];
 
-					// FILE *file1wq = fopen("/home/gjsk/opt_time_QBMPC_fast.txt", "a");
-					// fprintf(file1wq,"%lf\n",opt_time2-opt_time1);
-					// fclose(file1wq);
-					// FILE *file1wr = fopen("/home/gjsk/states_QBMPC_fast.txt", "a");
-					// fprintf(file1wr,"%lf,%lf,%lf,%lf,%lf\n",opt_time2,locx,locy,last_delta,vel_adapt);
-					// fclose(file1wr);
+					FILE *file1wq = fopen("/home/gjsk/catkin_ws/Sim_Data/opt_time_QBMPC_fast.txt", "a");
+					fprintf(file1wq,"%lf\n",opt_time2-opt_time1);
+					fclose(file1wq);
+					FILE *file1wr = fopen("/home/gjsk/catkin_ws/Sim_Data/states_QBMPC_fast.txt", "a");
+					fprintf(file1wr,"%lf,%lf,%lf,%lf,%lf\n",opt_time2,locx,locy,last_delta,vel_adapt);
+					fclose(file1wr);
 					printf("%lf, %lf\n",last_delta,vel_adapt);
 
 					
