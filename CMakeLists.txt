@@ -79,6 +79,7 @@ if(DEFINED CATKIN_DEVEL_PREFIX)
 add_message_files(
     FILES
     YoloData.msg
+    PathData.msg
   )
 
 
@@ -128,7 +129,10 @@ add_message_files(
   target_link_libraries(navigation_STLMPC ${QUADPROGPP_LIBRARIES})
   target_link_libraries(navigation_QBMPC ${QUADPROGPP_LIBRARIES})
   target_link_libraries(navigation_fast_QBMPC ${QUADPROGPP_LIBRARIES})
+  target_link_libraries(navigation_comm_QBMPC ${QUADPROGPP_LIBRARIES})
+  target_link_libraries(navigation_timeinv_QBMPC ${QUADPROGPP_LIBRARIES})
   target_link_libraries(navigation_lookahead_QBMPC ${QUADPROGPP_LIBRARIES})
+  target_link_libraries(navigation_fixedpoint_lookahead_QBMPC ${QUADPROGPP_LIBRARIES})
   target_link_libraries(navigation_STLMPC_vary_v ${QUADPROGPP_LIBRARIES})
   target_link_libraries(navigation_P_STLMPC ${QUADPROGPP_LIBRARIES})
   target_link_libraries(navigation_P_QBMPC ${QUADPROGPP_LIBRARIES})
@@ -139,6 +143,9 @@ add_message_files(
   target_link_libraries(navigation_STLMPC ${NLOPT_LIBRARIES})
   target_link_libraries(navigation_QBMPC ${NLOPT_LIBRARIES})
   target_link_libraries(navigation_fast_QBMPC ${NLOPT_LIBRARIES})
+  target_link_libraries(navigation_comm_QBMPC ${NLOPT_LIBRARIES})
+  target_link_libraries(navigation_timeinv_QBMPC ${NLOPT_LIBRARIES})
+  target_link_libraries(navigation_fixedpoint_lookahead_QBMPC ${NLOPT_LIBRARIES})
   target_link_libraries(navigation_lookahead_QBMPC ${NLOPT_LIBRARIES})
   target_link_libraries(navigation_STLMPC_vary_v ${NLOPT_LIBRARIES})
   target_link_libraries(navigation_P_STLMPC ${NLOPT_LIBRARIES})
