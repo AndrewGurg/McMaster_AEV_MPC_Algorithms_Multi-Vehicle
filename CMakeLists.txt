@@ -80,6 +80,7 @@ add_message_files(
     FILES
     YoloData.msg
     PathData.msg
+    SubObsData.msg
   )
 
 
