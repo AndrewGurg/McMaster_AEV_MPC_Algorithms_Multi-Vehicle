@@ -688,6 +688,7 @@ class GapBarrier
 {
 	private:
 		ros::NodeHandle nf;
+		ros::NodeHandle nhglobal;
 
 
 		//Subscriptions
@@ -702,6 +703,8 @@ class GapBarrier
 		ros::Subscriber tf_sub;
 		ros::Subscriber map_sub;
 		ros::Subscriber yolo_sub;
+		ros::Subscriber subobs_sub;
+		ros::Subscriber path_sub;
 
 		//More CV data members, used if use_camera is true
 		ros::Subscriber depth_img;
@@ -729,7 +732,8 @@ class GapBarrier
 		ros::Publisher driver_pub;
 		ros::Publisher cv_ranges_pub;
 		ros::Publisher subobs_pub;
-
+		ros::Publisher path_pub;
+		ros::Publisher ext_obst_mark;
 		
 		//topics
 		std::string depth_image_topic, depth_info_topic, cv_ranges_topic, depth_index_topic, color_image_topic, color_info_topic, cam_extr_topic,
@@ -737,6 +741,9 @@ class GapBarrier
 
 		// tf frames
 		std::string map_frame, base_frame, scan_frame, odom_frame, tf_prefix, ext_prefix;
+
+		// Multi Vehicle
+		std::string vehicle_prefix;
 
 		//time
 		double current_time = ros::Time::now().toSec();
@@ -770,6 +777,7 @@ class GapBarrier
 		visualization_msgs::Marker gplane_pts_marker;
 		visualization_msgs::Marker gplane_adj_marker;
 		visualization_msgs::Marker vehicle_detect_path;
+		visualization_msgs::Marker ext_obst_marker;
 
 		//steering & stop time
 		double vel;
@@ -845,6 +853,10 @@ class GapBarrier
 
 		// Communication
 		f1tenth_simulator::SubObsData submsg;
+		std::vector<std::vector<double>> ext_sub_obs;
+		double ext_rel_x=0, ext_rel_y=0, ext_rel_theta=0;
+		bool sim_pose_valid=false;
+		bool ext_tf_relative_valid=false;
 
 		ros::Time timestamp_tf1; ros::Time timestamp_tf2;
 		ros::Time timestamp_cam1; ros::Time timestamp_cam2;
@@ -893,6 +905,7 @@ class GapBarrier
 		GapBarrier(){
 
 			nf = ros::NodeHandle("~");
+			
 			// topics	
 			nf.getParam("depth_image_topic", depth_image_topic);
 			nf.getParam("rgb_image_topic", color_image_topic);
@@ -921,6 +934,8 @@ class GapBarrier
 			nf.getParam("odom_frame", odom_frame);
 			nf.getParam("tf_prefix", tf_prefix);
 
+			nf.getParam("vehicle_prefix", vehicle_prefix);
+
 			// Get an external vehicle's frame prefix
 			if(tf_prefix != ""){
 				int ego_num = tf_prefix[tf_prefix.find('/')-1] - '0';
@@ -930,8 +945,6 @@ class GapBarrier
 			else{
 				ext_prefix = "racecarX/";
 			}
-
-			ext_lidarscan_topic = ext_prefix + "scan";
 
 			//lidar params
 			nf.getParam("scan_beams", scan_beams);
@@ -1052,6 +1065,9 @@ class GapBarrier
 			intrinsics_d_defined= false; intrinsics_c_defined= false;
         	cv_image_data_defined= false;
 
+			// Generates a global namespace 
+			nhglobal = ros::NodeHandle("/");
+
 			//subscriptions
 			lidar = nf.subscribe(lidarscan_topic,1, &GapBarrier::lidar_callback, this);
 			ext_lidar = nf.subscribe(ext_lidarscan_topic,1, &GapBarrier::ext_lidar_callback, this);
@@ -1062,7 +1078,8 @@ class GapBarrier
 			tf_sub = nf.subscribe("/tf", 20, &GapBarrier::tf_callback, this);
 			map_sub = nf.subscribe(map_topic, 1, &GapBarrier::map_callback, this);
 			yolo_sub=nf.subscribe(yolo_data_topic, 1, &GapBarrier::yolo_callback, this);
-			yolo_sub=nf.subscribe(ext_prefix+"subobs", 1, &GapBarrier::subsampled_obstacle_callback, this);
+			subobs_sub=nhglobal.subscribe("/" + ext_prefix + "subobs", 1, &GapBarrier::subsampled_obstacle_callback, this);
+			path_sub=nhglobal.subscribe("/" + ext_prefix + "path", 1, &GapBarrier::path_callback, this);
 			
 
 			//publications
@@ -1077,7 +1094,9 @@ class GapBarrier
 			vehicle_detect=nf.advertise<visualization_msgs::Marker>("vehicle_detect",2);
 			vehicle_detect=nf.advertise<visualization_msgs::Marker>("vehicle_detect",2);
 			driver_pub = nf.advertise<ackermann_msgs::AckermannDriveStamped>(drive_topic, 1);
-			subobs_pub = nf.advertise<f1tenth_simulator::SubObsData>(tf_prefix+"subobs", 2);
+			subobs_pub = nf.advertise<f1tenth_simulator::SubObsData>(vehicle_prefix + "subobs", 2);
+			path_pub = nf.advertise<f1tenth_simulator::SubObsData>(vehicle_prefix + "path", 2);
+            ext_obst_mark = nf.advertise<visualization_msgs::Marker>("external_obstacles", 2);
 
 			if(use_camera)
 			{
@@ -1108,6 +1127,8 @@ class GapBarrier
 
 		void tf_callback(const tf2_msgs::TFMessage::ConstPtr& msg){ //Update the localization transforms
 			int updated=0;
+			bool have_ext_pose=false;
+			double ext_pose_x=0, ext_pose_y=0, ext_pose_theta=0;
 			 for (const geometry_msgs::TransformStamped& transform : msg->transforms)
 			{
 				if (transform.header.frame_id == odom_frame && transform.child_frame_id == base_frame)
@@ -1155,6 +1176,8 @@ class GapBarrier
 					double z=transform.transform.rotation.z;
 					double w=transform.transform.rotation.w;
 					double robtheta = atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z));
+					ext_pose_x=robx; ext_pose_y=roby; ext_pose_theta=robtheta;
+					have_ext_pose=true;
 
 					double detx=(robx-simx)*cos(simtheta)+(roby-simy)*sin(simtheta);
 					double dety=-(robx-simx)*sin(simtheta)+(roby-simy)*cos(simtheta);
@@ -1189,7 +1212,18 @@ class GapBarrier
 					double z=transform.transform.rotation.z;
 					double w=transform.transform.rotation.w;
 					simtheta = atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z));
+					sim_pose_valid=true;
 				}
+			}
+			if(have_ext_pose && sim_pose_valid){
+				// Convert the two TF poses directly to the ego frame
+				double dx=ext_pose_x-simx, dy=ext_pose_y-simy;
+				ext_rel_x=dx*cos(simtheta)+dy*sin(simtheta);
+				ext_rel_y=-dx*sin(simtheta)+dy*cos(simtheta);
+				ext_rel_theta=ext_pose_theta-simtheta;
+				while(ext_rel_theta>M_PI) ext_rel_theta-=2*M_PI;
+				while(ext_rel_theta<-M_PI) ext_rel_theta+=2*M_PI;
+				ext_tf_relative_valid=true;
 			}
 			if(updated){
 				locx=mapx+cos(maptheta)*odomx-sin(maptheta)*odomy;
@@ -2224,6 +2258,8 @@ class GapBarrier
 							sin(odomtheta)*(car_detects[q].meas_tf.tf_y+car_detects[q].meas[0]*sin(car_detects[q].meas_tf.tf_theta)+car_detects[q].meas[1]*cos(car_detects[q].meas_tf.tf_theta)-odomy);
 						curmeasy=-sin(odomtheta)*(car_detects[q].meas_tf.tf_x+car_detects[q].meas[0]*cos(car_detects[q].meas_tf.tf_theta)-car_detects[q].meas[1]*sin(car_detects[q].meas_tf.tf_theta)-odomx)+
 							cos(odomtheta)*(car_detects[q].meas_tf.tf_y+car_detects[q].meas[0]*sin(car_detects[q].meas_tf.tf_theta)+car_detects[q].meas[1]*cos(car_detects[q].meas_tf.tf_theta)-odomy);
+
+						car_detects[q].meas[0]=curmeasx; car_detects[q].meas[1]=curmeasy;
 					}
 					else{
 						tempx=cos(simtheta)*(lastx+car_detects[q].state[0]*cos(lasttheta)-car_detects[q].state[1]*sin(lasttheta)-simx)+
@@ -2381,6 +2417,7 @@ class GapBarrier
 			submsg.header.frame_id = base_frame;
 			submsg.header.stamp = ros::Time::now();
 			geometry_msgs::Point p;
+			submsg.sub_obs_pts.clear();
 			for (const auto& obstacle : sub_obstacles) {
 				p.x = obstacle[0]; p.y = obstacle[1]; p.z = 0;
 				submsg.sub_obs_pts.push_back(p);
@@ -2389,13 +2426,37 @@ class GapBarrier
 			subobs_pub.publish(submsg);
 		}
 
-		void subsampled_obstacle_callback(const f1tenth_simulator::SubObsData & sub_obs_msg){
-			// TODO 
+		void subsampled_obstacle_callback(const f1tenth_simulator::SubObsData & sub_obs_msg){ 
 			// Unpack the obstacle data from the message 
+			ext_sub_obs.clear();
+			for(const auto& obstacle : sub_obs_msg.sub_obs_pts){
+				ext_sub_obs.push_back({obstacle.x, obstacle.y}); 
+			}
 
+			// Use simulation TF when available; on hardware, use the YOLO tracker
+			// pose, which is maintained in the ego vehicle frame.
+			double rel_x, rel_y, rel_theta;
+			if(ext_tf_relative_valid){
+				rel_x=ext_rel_x; rel_y=ext_rel_y; rel_theta=ext_rel_theta;
+			}
+			else if(!car_detects.empty() && car_detects[0].init==2){
+				rel_x=car_detects[0].state[0];
+				rel_y=car_detects[0].state[1];
+				rel_theta=car_detects[0].state[2];
+			}
+			else{
+				ROS_WARN_THROTTLE(2.0, "External vehicle pose unavailable; cannot transform received obstacles");
+				return;
+			}
 
-			// Transform the obstacle data to my frame of reference
+			const double c=cos(rel_theta), s=sin(rel_theta);
+			for(auto& obstacle : ext_sub_obs){
+				const double x=obstacle[0], y=obstacle[1];
+				obstacle[0]=rel_x+c*x-s*y;
+				obstacle[1]=rel_y+s*x+c*y;
+			}
 
+			
 
 		}
 
@@ -2424,11 +2485,50 @@ class GapBarrier
 
 
 			std::vector<float> fused_ranges = data->ranges;
+			std::vector<double> lidar_transform_angles;
+			for(int i=0;i<data->ranges.size();i++){
+				lidar_transform_angles.push_back(i*data->angle_increment-M_PI);
+			}
+
 			if(use_camera)
 			{
 				if(cv_image_data_defined){ augment_camera(fused_ranges); }
 			}
 
+			//Select a subsample of the non-vehicle obstacles
+			std::vector<std::vector<double>> bez_obs_no_veh;
+			std::vector<std::vector<double>> sub_bez_obs_no_veh;
+			for(int i=0;i<fused_ranges.size();i++){
+				bez_obs_no_veh.push_back({fused_ranges[i]*cos(lidar_transform_angles[i]),fused_ranges[i]*sin(lidar_transform_angles[i])});
+			}
+
+			double obs_sep1=obs_sep;
+			double num_obs=100000;
+
+			while(num_obs>max_obs){
+				sub_bez_obs_no_veh.clear();
+				for (const auto& obstacle : bez_obs_no_veh) {
+					// Accessing x and y coordinates
+					double x_ob = obstacle[0]; // x coordinate
+					double y_ob = obstacle[1]; // y coordinate
+					double min_dist=100;
+
+					for (const auto& obstacle1 : sub_bez_obs_no_veh) {
+						double mydist=pow(pow(obstacle1[0]-x_ob,2)+pow(obstacle1[1]-y_ob,2),0.5);
+						if(mydist<min_dist){
+							min_dist=mydist;
+						}
+					}
+					if(min_dist>obs_sep1 && pow(pow(x_ob,2)+pow(y_ob,2),0.5)<max_lidar_range_opt){
+						sub_bez_obs_no_veh.push_back({obstacle[0],obstacle[1]});
+					}
+					
+				}
+				num_obs=sub_bez_obs_no_veh.size();
+				obs_sep1=obs_sep1*1.1;
+			}
+			// Publish my subsampled obstacle data from my frame
+			subsampled_obstacle_publisher(sub_bez_obs_no_veh);
 
 
 			if (!nav_active ||(use_map && !map_saved)) { //Don't start navigation until map is saved if that's what we're using
@@ -2463,10 +2563,6 @@ class GapBarrier
 				std::pair<double,double> first_MPC;
 				double heading_angle;
 
-				std::vector<double> lidar_transform_angles;
-				for(int i=0;i<data->ranges.size();i++){
-					lidar_transform_angles.push_back(i*data->angle_increment-M_PI);
-				}
 
 				double startxplot[nMPC],startyplot[nMPC],xptplot[nMPC],yptplot[nMPC];
 				std::vector<double> wl = {0.0, 0.0};
@@ -2806,8 +2902,6 @@ class GapBarrier
 					obs_sep1=obs_sep1*1.1;
 				}
 
-				// Publish my subsampled obstacle data from my frame
-				subsampled_obstacle_publisher(sub_bez_obs);
 
 				// FILE *file1 = fopen("/home/gjsk/catkin_ws/bezier.txt", "a");
 				// fprintf(file1,"*******************\n");
@@ -2985,7 +3079,7 @@ class GapBarrier
 
 				//TODO 
 				// Get the subsample of obstacles from external vehicle (Most recent publish from that vehicle for now)
-
+				// Stored in ext_sub_obs
 
 				
 				// Begin second optimization
@@ -3037,6 +3131,7 @@ class GapBarrier
 					opt_params2.push_back(sub_bez_obs[i][1]);
 					// TODO 
 					// Add obstacles from external vehicle
+					
 				}
 
 				nlopt_set_min_objective(opt, myfunc_mult, opt_params1.data());
@@ -3056,7 +3151,7 @@ class GapBarrier
 				xnew[4]=std::min(std::max(-max_lidar_range+1e-6,yptplot[1]),max_lidar_range-1e-6); //y4
 
 				// TODO
-				// xptplot should come from the path data of the external vehicle
+				// xptplot and yptplot should come from the path data of the external vehicle
 				// Second vehicle initial guess
 				xnew[5]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
 				xnew[6]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]),max_lidar_range-1e-6); //x3
@@ -3129,13 +3224,13 @@ class GapBarrier
 
 					
 					double t= std::max(default_dt,dt)/bez_t_end;
-					double x_dot=4*bez_x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
-					double x_ddot=4*bez_x1*(-12*pow(t,2)+18*t-6)+6*x[0]*(12*pow(t,2)-12*t+2)+4*x[1]*(-12*pow(t,2)+6*t)+12*x[3]*pow(t,2);
-					double x_dddot=4*bez_x1*(-24*t+18)+6*x[0]*(24*t-12)+4*x[1]*(-24*t+6)+24*x[3]*t;
+					double x_dot=4*bez_x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*xnew[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
+					double x_ddot=4*bez_x1*(-12*pow(t,2)+18*t-6)+6*x[0]*(12*pow(t,2)-12*t+2)+4*xnew[1]*(-12*pow(t,2)+6*t)+12*x[3]*pow(t,2);
+					double x_dddot=4*bez_x1*(-24*t+18)+6*x[0]*(24*t-12)+4*xnew[1]*(-24*t+6)+24*xnew[3]*t;
 
-					double y_dot=6*bez_y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
-					double y_ddot=6*bez_y2*(12*pow(t,2)-12*t+2)+4*x[2]*(-12*pow(t,2)+6*t)+12*x[4]*pow(t,2);
-					double y_dddot=6*bez_y2*(24*t-12)+4*x[2]*(-24*t+6)+24*x[4]*t;
+					double y_dot=6*bez_y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*xnew[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
+					double y_ddot=6*bez_y2*(12*pow(t,2)-12*t+2)+4*xnew[2]*(-12*pow(t,2)+6*t)+12*x[4]*pow(t,2);
+					double y_dddot=6*bez_y2*(24*t-12)+4*xnew[2]*(-24*t+6)+24*xnew[4]*t;
 
 					double curv=(x_dot*y_ddot-y_dot*x_ddot)/(pow(pow(x_dot,2)+pow(y_dot,2),1.5));
 					double curv_dot=((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))/pow((pow(x_dot,2)+pow(y_dot,2)),2.5);
@@ -3145,23 +3240,22 @@ class GapBarrier
 					last_delta=std::min(max_steering_angle,last_delta);
 					vel_adapt=std::min(pow(pow(x_dot,2)+pow(y_dot,2),0.5)/bez_t_end,max_speed);
 
-					// TODO
-					// Adapt this for the second vehicle
-					double x_dot_v2=4*bez_x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
-					double x_ddot_v2=4*bez_x1*(-12*pow(t,2)+18*t-6)+6*x[0]*(12*pow(t,2)-12*t+2)+4*x[1]*(-12*pow(t,2)+6*t)+12*x[3]*pow(t,2);
-					double x_dddot_v2=4*bez_x1*(-24*t+18)+6*x[0]*(24*t-12)+4*x[1]*(-24*t+6)+24*x[3]*t;
+					// Second Vehicle
+					double x_dot_v2=4*bez_x1_v2*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*xnew[5]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*xnew[6]*(-4*pow(t,3)+3*pow(t,2))+4*xnew[8]*pow(t,3);
+					double x_ddot_v2=4*bez_x1_v2*(-12*pow(t,2)+18*t-6)+6*xnew[5]*(12*pow(t,2)-12*t+2)+4*xnew[6]*(-12*pow(t,2)+6*t)+12*xnew[8]*pow(t,2);
+					double x_dddot_v2=4*bez_x1_v2*(-24*t+18)+6*xnew[5]*(24*t-12)+4*xnew[6]*(-24*t+6)+24*xnew[8]*t;
 
-					double y_dot_v2=6*bez_y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
-					double y_ddot_v2=6*bez_y2*(12*pow(t,2)-12*t+2)+4*x[2]*(-12*pow(t,2)+6*t)+12*x[4]*pow(t,2);
-					double y_dddot_v2=6*bez_y2*(24*t-12)+4*x[2]*(-24*t+6)+24*x[4]*t;
+					double y_dot_v2=6*bez_y2_v2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*xnew[7]*(-4*pow(t,3)+3*pow(t,2))+4*xnew[9]*pow(t,3);
+					double y_ddot_v2=6*bez_y2_v2*(12*pow(t,2)-12*t+2)+4*xnew[7]*(-12*pow(t,2)+6*t)+12*xnew[9]*pow(t,2);
+					double y_dddot_v2=6*bez_y2_v2*(24*t-12)+4*xnew[7]*(-24*t+6)+24*xnew[9]*t;
 
-					double curv_v2=(x_dot*y_ddot-y_dot*x_ddot)/(pow(pow(x_dot,2)+pow(y_dot,2),1.5));
-					double curv_dot_v2=((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))/pow((pow(x_dot,2)+pow(y_dot,2)),2.5);
+					double curv_v2=(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2)/(pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),1.5));
+					double curv_dot_v2=((x_dot_v2*y_dddot_v2-y_dot_v2*x_dddot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-3*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2))/pow((pow(x_dot_v2,2)+pow(y_dot_v2,2)),2.5);
 
-					last_delta=atan2(curv*wheelbase,1);
-					last_delta=std::max(-max_steering_angle,last_delta);
-					last_delta=std::min(max_steering_angle,last_delta);
-					vel_adapt=std::min(pow(pow(x_dot,2)+pow(y_dot,2),0.5)/bez_t_end,max_speed);
+					last_delta_v2=atan2(curv_v2*wheelbase,1);
+					last_delta_v2=std::max(-max_steering_angle,last_delta_v2);
+					last_delta_v2=std::min(max_steering_angle,last_delta_v2);
+					vel_adapt_v2=std::min(pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),0.5)/bez_t_end,max_speed);
 
 
 				}
@@ -3287,7 +3381,6 @@ class GapBarrier
 				bez.id = 0; 
 				bez.ns = "points";
 				bez.action = visualization_msgs::Marker::ADD;
-				bez.scale.x = 0.1;
 				bez.color.a = 1.0;
 				bez.color.r = 0.6; 
 				bez.color.g = 0.2;
@@ -3314,6 +3407,36 @@ class GapBarrier
 				}
 
 				bez_mark.publish(bez);
+
+
+				//Publish the external vehicle obstacles
+				ext_obst_marker.header.frame_id = base_frame;
+				ext_obst_marker.header.stamp = ros::Time::now();
+				ext_obst_marker.type = visualization_msgs::Marker::POINTS;
+				ext_obst_marker.id = 0;
+				ext_obst_marker.ns = "points";
+				ext_obst_marker.action = visualization_msgs::Marker::ADD;
+				ext_obst_marker.color.a = 1.0;
+				ext_obst_marker.color.r = 1.0;
+				ext_obst_marker.color.g = 0.2;
+				ext_obst_marker.color.b = 0.1;
+				ext_obst_marker.pose.orientation.w = 1.0;
+				
+				ext_obst_marker.scale.x = 0.12;
+				ext_obst_marker.scale.y = 0.12;
+
+				ext_obst_marker.lifetime = ros::Duration(0.1);
+				ext_obst_marker.points.clear();
+
+				geometry_msgs::Point point;
+				for(const auto& obstacle : ext_sub_obs){
+					point.x = obstacle[0];
+					point.y = obstacle[1];
+					point.z = 0.0;
+					ext_obst_marker.points.push_back(point);
+				}
+	
+				ext_obst_mark.publish(ext_obst_marker);
 
 
 			}

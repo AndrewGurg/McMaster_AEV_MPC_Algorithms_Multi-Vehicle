@@ -8,7 +8,7 @@ width: 0.342 # meters
 buffer_length: 5
 
 # Limits on the speed and steering angle
-max_speed: 3.0 #  meters/second
+max_speed: 2.2 #  meters/second
 min_speed: 0 # Otherwise, vehicle stops (for QBMPC)
 max_steering_angle: 0.4189 # radians
 max_accel: 2.5 #7.51 # meters/second^2
@@ -47,7 +47,7 @@ cv_ground_angle: rad(0/180*pi) # radians; angle below which we validate points w
 cv_distance_to_lidar: 0.27017 # meters
 
 #ground plane parameters
-cv_groundplane_max_height: 0.03 #max height at which points will be considered for fitting the ground plane 0.04 was good
+cv_groundplane_max_height: 0.08 #max height at which points will be considered for fitting the ground plane 0.04 was good
 cv_groundplane_max_distance: 0.03 #max distance from plane at which point is considered ground 0.025 was good
 
 #neural network parameters
@@ -156,8 +156,8 @@ depth_index_topic: "/depth_index"
 depth_points_topic: "/depth_points"
 
 # Multi vehicle parameters
-num_vehicles: 2
-vehicle_prefix: "racecar"
+num_vehicles: 1
+vehicle_prefix: "/racecar/"
 
 
 # Topic names of various drive channels
@@ -224,19 +224,21 @@ k_p: 3.5
 vehicle_velocity: 1.5
 turn_velocity: 0.8
 velocity_zero: 0.3
+
 # Gap Following Algorithm Parameters
 
 safe_distance: 2 # MODIFIED up from 2
-right_beam_angle: rad(2*pi*4.0/16)
-left_beam_angle: rad(2*pi*12.0/16)
+right_beam_angle: rad(2*pi*5.0/16)    # rad(2*pi*4.0/16) = 90 deg right of center
+left_beam_angle: rad(2*pi*11.0/16)    # rad(2*pi*12.0/16) = 90 deg left of center
 turn_angle1: rad(pi/6)
 turn_angle2: rad(pi/3)
 stop_time1: 1.0
 stop_time2: 1.0
+
 # Speed control paramteres
 heading_beam_angle: rad(pi/8)
-stop_distance: 0.8 #m
-stop_distance_decay: 0.5 #m
+stop_distance: 0.4 #m
+stop_distance_decay: 0.25 #m
 
 #TEB & Comparison Waypoint Generation
 waypoint_distance: 1.0
@@ -274,12 +276,12 @@ vel_factor_STLMPC_vary_v: 1
 #Bezier MPC Parameters
 bez_ctrl_pts: 5
 bez_curv_pts: 10
-bez_alpha: 5.5
-bez_beta: 10
-bez_min_dist: 0.5
+bez_alpha: 1 # Modified from 5.5
+bez_beta: 10  # Modified from 10
+bez_min_dist: 0.5 # Modified up from 0.5
 bez_t_end: 1.5 # MODIFIED Up from 1.5, longer time horizon
 obs_sep: 0.2
-max_obs: 50
+max_obs: 100
 #QBMPC only has one objective term, no need for base weights
 
 # F-QBMPC Parameters
@@ -287,10 +289,12 @@ theta_band_smooth: 200
 theta_band_diff: rad(pi/8)
 vel_beta: 10
 stop_dist_decay: 0.5
+disp_ext_factor: 0.5
 
 # F-QBMPC Base Weights
 pot_field_factor_F_QBMPC: 1
-velocity_factor_F_QBMPC: 10
+velocity_factor_F_QBMPC: 5
+
 
 #Leader-follower MPC pursuit parameters
 MPC_dist: 0.8 #Min distance, below which we focus on MPC
@@ -316,7 +320,7 @@ pursuit_factor_P_QBMPC: 0.1
 
 # Separating Barrier Line Optimization Mode: 0 (independent) 1 (parallel) 
 optim_mode: 1 
-max_lidar_range_opt: 5.0
+max_lidar_range_opt: 15.0
 # Determines if RGB-D camera is used
 use_camera: 1
 

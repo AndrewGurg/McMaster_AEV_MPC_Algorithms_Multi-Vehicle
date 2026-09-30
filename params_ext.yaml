@@ -47,7 +47,7 @@ cv_ground_angle: rad(0/180*pi) # radians; angle below which we validate points w
 cv_distance_to_lidar: 0.27017 # meters
 
 #ground plane parameters
-cv_groundplane_max_height: 0.03 #max height at which points will be considered for fitting the ground plane 0.04 was good
+cv_groundplane_max_height: 0.08 #max height at which points will be considered for fitting the ground plane 0.04 was good
 cv_groundplane_max_distance: 0.03 #max distance from plane at which point is considered ground 0.025 was good
 
 #neural network parameters
@@ -132,9 +132,12 @@ keyboard_steer_ang: .3  # radians
 # obstacle parameters
 obstacle_size: 2
 
+# Vehicle Prefix for Multi Vehicle
+vehicle_prefix: "/racecar2/"
+
 # The names of topics to listen and publish to
 joy_topic: "/joy"
-drive_topic: "/racecar2/drive" #Change to /drive for normal control from joy
+drive_topic: "/racecar2/drive"
 map_topic: "/map"
 distance_transform_topic: "/dt"
 scan_topic: "/racecar2/scan"
@@ -226,15 +229,15 @@ velocity_zero: 0.3
 # Gap Following Algorithm Parameters
 
 safe_distance: 2 # MODIFIED up from 2
-right_beam_angle: rad(2*pi*4.0/16)
-left_beam_angle: rad(2*pi*12.0/16)
+right_beam_angle: rad(2*pi*5.0/16)
+left_beam_angle: rad(2*pi*11.0/16)
 turn_angle1: rad(pi/6)
 turn_angle2: rad(pi/3)
 stop_time1: 1.0
 stop_time2: 1.0
 # Speed control paramteres
 heading_beam_angle: rad(pi/8)
-stop_distance: 0.8 #m
+stop_distance: 0.5 #m
 stop_distance_decay: 0.5 #m
 
 #TEB & Comparison Waypoint Generation
@@ -273,12 +276,12 @@ vel_factor_STLMPC_vary_v: 1
 #Bezier MPC Parameters
 bez_ctrl_pts: 5
 bez_curv_pts: 10
-bez_alpha: 5.5
+bez_alpha: 1
 bez_beta: 10
 bez_min_dist: 0.5
 bez_t_end: 1.5 # MODIFIED Up from 1.5, longer time horizon
 obs_sep: 0.2
-max_obs: 50
+max_obs: 100
 #QBMPC only has one objective term, no need for base weights
 
 # F-QBMPC Parameters
@@ -289,7 +292,7 @@ stop_dist_decay: 0.5
 
 # F-QBMPC Base Weights
 pot_field_factor_F_QBMPC: 1
-velocity_factor_F_QBMPC: 10
+velocity_factor_F_QBMPC: 5
 
 #Leader-follower MPC pursuit parameters
 MPC_dist: 0.8 #Min distance, below which we focus on MPC
@@ -315,7 +318,7 @@ pursuit_factor_P_QBMPC: 0.1
 
 # Separating Barrier Line Optimization Mode: 0 (independent) 1 (parallel) 
 optim_mode: 1 
-max_lidar_range_opt: 5.0
+max_lidar_range_opt: 15.0
 # Determines if RGB-D camera is used
 use_camera: 1
 

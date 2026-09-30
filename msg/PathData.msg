@@ -1,5 +1,6 @@
-Header header
-geometry_msgs/Point[] points
+std_msgs/Header header
+float64[] xptplot
+float64[] yptplot
 float32 time_horizon
 int32 num_disc
 bool fixed

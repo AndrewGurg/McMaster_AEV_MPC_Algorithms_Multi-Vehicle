@@ -1,4 +1,4 @@
-Header header
+std_msgs/Header header
 geometry_msgs/Point[] sub_obs_pts
 int32 size
 

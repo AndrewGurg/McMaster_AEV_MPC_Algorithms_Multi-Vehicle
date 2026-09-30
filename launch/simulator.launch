@@ -1,12 +1,13 @@
 <?xml version="1.0"?>
 <launch>
+
   <!-- Listen to messages from joysicks -->
   <node pkg="joy" name="joy_node" type="joy_node">
   <param name="autorepeat_rate" value="2"/>
   </node>
 
   <!-- Launch a map from the maps folder-->
-  <arg name="map" default="$(find f1tenth_simulator)/maps/levinelobby.yaml"/>
+  <arg name="map" default="$(find f1tenth_simulator)/maps/berlin.yaml"/>
   <node pkg="map_server" name="map_server" type="map_server" args="$(arg map)"/>
 
   <!-- Launch the racecar model -->
@@ -47,19 +48,35 @@
 
   <!-- <node pkg="f1tenth_simulator" name="navigation_QBMPC" type="navigation_QBMPC" output="screen">
     <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
+    <param name="min_speed" value="1.5"/>
+    <param name="use_camera" value="0"/>
   </node> -->
 
   <!-- <node pkg="f1tenth_simulator" name="navigation_STLMPC_vary_v" type="navigation_STLMPC_vary_v" output="screen">
     <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
   </node> -->
 
-  <node pkg="f1tenth_simulator" name="navigation_fast_QBMPC" type="navigation_fast_QBMPC" output="screen">
+  <!-- <node pkg="f1tenth_simulator" name="navigation_fast_QBMPC" type="navigation_fast_QBMPC" output="screen">
     <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
+    <param name="use_camera" value="0"/>
+  </node> -->
+
+  <!-- <node pkg="f1tenth_simulator" name="navigation_timeinv_QBMPC" type="navigation_timeinv_QBMPC" output="screen">
+    <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
+  </node> -->
+
+  <!-- <node pkg="f1tenth_simulator" name="navigation_lookahead_QBMPC" type="navigation_lookahead_QBMPC" output="screen">
+    <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
+  </node> -->
+
+  <node pkg="f1tenth_simulator" name="navigation_comm_QBMPC" type="navigation_comm_QBMPC" output="screen">
+    <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
+    <param name="use_camera" value="0"/>
   </node>
 
-  <node pkg="f1tenth_simulator" name="vehicle_detector" type="vehicle_detection" output="screen">
+  <!-- <node pkg="f1tenth_simulator" name="vehicle_detector" type="vehicle_detection" output="screen">
     <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
-  </node>
+  </node> -->
 
   <!-- Choose one of the leader-follower MPC Navigation nodes-->
 
