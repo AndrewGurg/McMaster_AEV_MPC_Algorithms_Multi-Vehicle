@@ -52,6 +52,7 @@
 #include <cmath> //M_PI, round
 #include <sstream>
 #include <algorithm>
+#include <stdexcept>
 
 #include <QuadProg++.hh>
 #undef inverse // Remove the conflicting macro
@@ -65,6 +66,7 @@ int nMPC=0; //Defined outside class to be used in predefined functions for nlopt
 int kMPC=0;
 
 int num_cons=9; // Number of inequality constraints used in optimization
+int num_cons_mult = 18; // Number of inequality constraints used in optimization for multiple vehicles
 
 struct float3
 {
@@ -88,6 +90,32 @@ struct tf_data
 	double tf_theta=0;
 	double tf_time=0;
 };
+
+std::vector<std::vector<double>> transform_points_to_ego_frame(
+	const std::vector<std::vector<double>>& points,
+	double ext_x,
+	double ext_y,
+	double ext_head)
+{
+	// Translates a set of points to a new coordinate frame given the position and orientation relative to the current frame
+	const double cos_heading = std::cos(ext_head);
+	const double sin_heading = std::sin(ext_head);
+	std::vector<std::vector<double>> transformed_points;
+	transformed_points.reserve(points.size());
+
+	for (const auto& point : points) {
+		if (point.size() != 2) {
+			throw std::invalid_argument("Each point must contain exactly two coordinates");
+		}
+
+		transformed_points.push_back({
+			ext_x + cos_heading * point[0] - sin_heading * point[1],
+			ext_y + sin_heading * point[0] + cos_heading * point[1]
+		});
+	}
+
+	return transformed_points;
+}
 
 struct vehicle_detection
 {
@@ -214,18 +242,28 @@ double myfunc_mult(unsigned n, const double *x, double *grad, void *my_func_data
 	double bez_alpha=xopt[1][1]; //Shaping of the exponential decay for further points
 	double x1=xopt[0][2]; //These are fixed by initial conditions and thus aren't variables in optimization
 	double y2=xopt[1][2];
-	double x1_v2=xopt[0][3]; 
-	double y2_v2=xopt[1][3];
-	double potfield_factor=xopt[0][4];
-	double vel_factor=xopt[1][4];
-	int num_param_pairs = 5;
+	double x0_v2=xopt[0][3];
+	double y0_v2=xopt[1][3];
+	double x1_v2=xopt[0][4]; 
+	double y2_v2=xopt[1][4];
+	double potfield_factor=xopt[0][5];
+	double vel_factor=xopt[1][5];
+	double theta_v2=xopt[0][6];
+	double y1_v2=xopt[1][6];
+	int num_param_pairs = 7;
 	std::vector<std::vector<double>> bez_curv;
+	std::vector<std::vector<double>> bez_curv2;
 	//Optimization variables:
 	//[0] -> x2
 	//[1] -> x3
 	//[2] -> y3
 	//[3] -> x4
 	//[4] -> y4
+	//[5] -> x2_v2
+	//[6] -> x3_v2
+	//[7] -> y3_v2
+	//[8] -> x4_v2
+	//[9] -> y4_v2
 
 	//Create the discretized Bezier Curve for Vehicle 1
 	for(int i=0; i<bez_curv_pts; i++){
@@ -233,6 +271,14 @@ double myfunc_mult(unsigned n, const double *x, double *grad, void *my_func_data
 		double bez_x=4*pow(1-t,3)*t*x1+6*pow(1-t,2)*pow(t,2)*x[0]+4*(1-t)*pow(t,3)*x[1]+pow(t,4)*x[3];
 		double bez_y=6*pow(1-t,2)*pow(t,2)*y2+4*(1-t)*pow(t,3)*x[2]+pow(t,4)*x[4]; //y1=0
 		bez_curv.push_back({bez_x,bez_y});
+	}
+
+	// Create the discretized Bezier Curve for Vehicle 2
+	for(int i=0; i<bez_curv_pts; i++){
+		double t=double(i)/double(bez_curv_pts-1);
+		double bez_x= pow(1-t, 4)*x0_v2 + 4*pow(1-t,3)*t*x1_v2+6*pow(1-t,2)*pow(t,2)*x[5]  +4*(1-t)*pow(t,3)*x[6] + pow(t,4)*x[8];
+		double bez_y= pow(1-t, 4)*y0_v2 + 4*pow(1-t,3)*t*y1_v2+6*pow(1-t,2)*pow(t,2)*y2_v2 +4*(1-t)*pow(t,3)*x[7] + pow(t,4)*x[9];
+		bez_curv2.push_back({bez_x,bez_y});
 	}
 
 	double funcreturn=0.0;
@@ -268,7 +314,7 @@ double myfunc_mult(unsigned n, const double *x, double *grad, void *my_func_data
 		double y_dot=6*y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*x[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
 		double pdx2=6*(4*pow(t,3)-6*pow(t,2)+2*t);double pdx3=4*(-4*pow(t,3)+3*pow(t,2));double pdy3=pdx3;double pdx4=4*pow(t,3);double pdy4=pdx4; //X_dot & y_dot
 		
-		// Additional objective term favoring high velocities
+		// Objective term favoring high velocities for Vehicle 1
 		double vel2 = pow(x_dot,2)+pow(y_dot,2);
 		funcreturn=funcreturn + (vel_factor/vel2);// Sum of reciprocal squared velocities 
 		if(grad){
@@ -277,7 +323,56 @@ double myfunc_mult(unsigned n, const double *x, double *grad, void *my_func_data
 		/*M_y3*/	grad[2]=grad[2]-(vel_factor/pow(vel2,2))*2*y_dot*pdy3;
 		/*M_x4*/	grad[3]=grad[3]-(vel_factor/pow(vel2,2))*2*x_dot*pdx4;
 		/*M_y4*/	grad[4]=grad[4]-(vel_factor/pow(vel2,2))*2*y_dot*pdy4;
-		}						
+		}	
+		
+		// Additional obstacle avoidance term for the second vehicle
+		for(int j=0;j<cols-num_param_pairs;j++){
+			double dist2_v2 = pow(bez_curv2[i][0]-xopt[0][j+num_param_pairs],2)+pow(bez_curv2[i][1]-xopt[1][j+num_param_pairs],2);
+			funcreturn = funcreturn + (potfield_factor/dist2_v2)*exp(-bez_alpha*dist2_v2);
+			if(grad){
+				/* v2 x2 */ grad[5] = grad[5]-potfield_factor*2*(bez_curv2[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2_v2+1.0/pow(dist2_v2,2))*exp(-bez_alpha*dist2_v2)*px2;
+				/* v2 x3 */ grad[6] = grad[6]-potfield_factor*2*(bez_curv2[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2_v2+1.0/pow(dist2_v2,2))*exp(-bez_alpha*dist2_v2)*px3;
+				/* v2 y3 */ grad[7] = grad[7]-potfield_factor*2*(bez_curv2[i][1]-xopt[1][j+num_param_pairs])*(bez_alpha/dist2_v2+1.0/pow(dist2_v2,2))*exp(-bez_alpha*dist2_v2)*py3;
+				/* v2 x4 */ grad[8] = grad[8]-potfield_factor*2*(bez_curv2[i][0]-xopt[0][j+num_param_pairs])*(bez_alpha/dist2_v2+1.0/pow(dist2_v2,2))*exp(-bez_alpha*dist2_v2)*px4;
+				/* v2 y4 */ grad[9] = grad[9]-potfield_factor*2*(bez_curv2[i][1]-xopt[1][j+num_param_pairs])*(bez_alpha/dist2_v2+1.0/pow(dist2_v2,2))*exp(-bez_alpha*dist2_v2)*py4;
+			}
+		}
+
+		// Additional velocity term for the second vehicle
+		double x2_dot = 4*x0_v2*(pow(t,3)-3*pow(t,2)+3*t-1) + 4*x1_v2*(-4*pow(t,3)+9*pow(t,2)-6*t+1) + 6*x[5]*(4*pow(t,3)-6*pow(t,2)+2*t)  + 4*x[6]*(-4*pow(t,3)+3*pow(t,2)) 	+ 4*x[8]*pow(t,3);
+		double y2_dot = 4*y0_v2*(pow(t,3)-3*pow(t,2)+3*t-1) + 4*y1_v2*(-4*pow(t,3)+9*pow(t,2)-6*t+1) + 6*y2_v2*(4*pow(t,3)-6*pow(t,2)+2*t) + 4*x[7]*(-4*pow(t,3)+3*pow(t,2)) 	+ 4*x[9]*pow(t,3);
+		double pdx2_v2 = 6*(4*pow(t,3)-6*pow(t,2)+2*t); double pdx3_v2 = 4*(-4*pow(t,3)+3*pow(t,2)); double pdy3_v2 = pdx3_v2; double pdx4_v2 = 4*pow(t,3); double pdy4_v2 = pdx4_v2;
+		double vel2_v2 = pow(x2_dot,2)+pow(y2_dot,2);
+		funcreturn = funcreturn + (vel_factor/vel2_v2);
+		if(grad){
+			/*M_x2_v2*/ grad[5] = grad[5]-(vel_factor/pow(vel2_v2,2))*2*x2_dot*pdx2_v2;
+			/*M_x3_v2*/ grad[6] = grad[6]-(vel_factor/pow(vel2_v2,2))*2*x2_dot*pdx3_v2;
+			/*M_y3_v2*/ grad[7] = grad[7]-(vel_factor/pow(vel2_v2,2))*2*y2_dot*pdy3_v2;
+			/*M_x4_v2*/ grad[8] = grad[8]-(vel_factor/pow(vel2_v2,2))*2*x2_dot*pdx4_v2;
+			/*M_y4_v2*/ grad[9] = grad[9]-(vel_factor/pow(vel2_v2,2))*2*y2_dot*pdy4_v2;
+		}
+
+		// TODO
+		// Additional obstacle avoidance term for the second vehicle's Bezier curve against the first vehicle's Bezier curve
+		// Each point of both bezier curves should stay far from each point of the other bezier curve
+	// 	for(int j=0;j<bez_curv_pts;j++){
+	// 		double dist2= pow(bez_curv[i][0]-bez_curv2[j][0],2)+pow(bez_curv[i][1]-bez_curv2[j][1],2); //Squared distance
+			
+	// 		funcreturn=funcreturn+(potfield_factor/dist2)*exp(-bez_alpha*dist2); //Sum of reciprocal squared distances, exponentially decaying weight
+	// 		//Next, find grad for each of five variables
+	// 		if(grad){
+	// /* x2 */ 	grad[0]=grad[0]-potfield_factor*2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px2;
+	// /* x3 */ 	grad[1]=grad[1]-potfield_factor*2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px3;
+	// /* y3 */ 	grad[2]=grad[2]-potfield_factor*2*(bez_curv[i][1]-bez_curv2[j][1])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py3;
+	// /* x4 */ 	grad[3]=grad[3]-potfield_factor*2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px4;
+	// /* y4 */ 	grad[4]=grad[4]-potfield_factor*2*(bez_curv[i][1]-bez_curv2[j][1])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py4;
+	// /* x2_v2 */ grad[5]=grad[5]-potfield_factor*-2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px2;
+	// /* x3_v2 */ grad[6]=grad[6]-potfield_factor*-2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px3;
+	// /* y3_v2 */ grad[7]=grad[7]-potfield_factor*-2*(bez_curv[i][1]-bez_curv2[j][1])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py3;
+	// /* x4_v2 */ grad[8]=grad[8]-potfield_factor*-2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px4;
+	// /* y4_v2 */ grad[9]=grad[9]-potfield_factor*-2*(bez_curv[i][1]-bez_curv2[j][1])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py4;
+	// 		}
+	// 	}
 		
 	}
 
@@ -321,7 +416,7 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 	//[3] -> x4
 	//[4] -> y4
 	
-	//Create the discretized Bezier Curve
+	//Create the discretized Bezier Curve for Vehicle 1
 	for(int i=0; i<bez_curv_pts; i++){
 		double t=double(i)/double(bez_curv_pts);
 		double bez_x=4*pow(1-t,3)*t*x1+6*pow(1-t,2)*pow(t,2)*x[0]+4*(1-t)*pow(t,3)*x[1]+pow(t,4)*x[3];
@@ -501,28 +596,38 @@ void bezier_inequality_con_mult(unsigned m, double *result, unsigned n, const do
 	int bez_beta=xopt[1][1]; //Large value to use softmin function which is differentiable (different from alpha used in myfunc)
 	double x1=xopt[0][2]; //These are fixed by initial conditions and thus aren't variables in optimization
 	double y2=xopt[1][2];
-	double x1_v2=xopt[0][3];
-	double y2_v2=xopt[1][3];
-	double max_v=xopt[0][4]; //Highest allowed velocity
-	double min_v=xopt[1][4]; //Minimum allowed velocity (if set lower, our vehicle just stops)
-	double max_dv=xopt[0][5]; //Max allowable change in m/s^2 from motor (acceleration)
-	double max_delta=xopt[1][5]; //Max allowable steering angle
-	double max_ddelta=xopt[0][6]; //Max change in steering angle
-	double t_end=xopt[1][6]; //Temporal scaling of the Bezier Curve
-	double wheelbase=xopt[0][7]; //Physical constant property of vehicle
-	double bez_min_dist=xopt[1][7]; //Our constraint on minimum distance to an obstacle
-	double theta_band_smooth=xopt[0][8];
-	double theta_band_diff=xopt[1][8];
-	double vel_beta=xopt[0][9];
-	double stop_dist_decay=xopt[1][9];
-	int num_param_pairs = 10;
+	double x0_v2=xopt[0][3]; //These are fixed by initial conditions and thus aren't variables in optimization
+	double y0_v2=xopt[1][3]; //These are fixed by initial conditions and thus aren't variables in optimization
+	double x1_v2=xopt[0][4];
+	double y2_v2=xopt[1][4];
+	double max_v=xopt[0][5]; //Highest allowed velocity
+	double min_v=xopt[1][5]; //Minimum allowed velocity (if set lower, our vehicle just stops)
+	double max_dv=xopt[0][6]; //Max allowable change in m/s^2 from motor (acceleration)
+	double max_delta=xopt[1][6]; //Max allowable steering angle
+	double max_ddelta=xopt[0][7]; //Max change in steering angle
+	double t_end=xopt[1][7]; //Temporal scaling of the Bezier Curve
+	double wheelbase=xopt[0][8]; //Physical constant property of vehicle
+	double bez_min_dist=xopt[1][8]; //Our constraint on minimum distance to an obstacle
+	double theta_band_smooth=xopt[0][9];
+	double theta_band_diff=xopt[1][9];
+	double vel_beta=xopt[0][10];
+	double stop_dist_decay=xopt[1][10];
+	double theta_v2=xopt[0][11];
+	double y1_v2=xopt[1][11];
+	int num_param_pairs = 12;
 	std::vector<std::vector<double>> bez_curv;
+	std::vector<std::vector<double>> bez_curv_v2;
 	//Optimization variables:
 	//[0] -> x2
 	//[1] -> x3
 	//[2] -> y3
 	//[3] -> x4
 	//[4] -> y4
+	//[5] -> x2_v2
+	//[6] -> x3_v2
+	//[7] -> y3_v2
+	//[8] -> x4_v2
+	//[9] -> y4_v2
 	
 	//Create the discretized Bezier Curve
 	for(int i=0; i<bez_curv_pts; i++){
@@ -532,8 +637,18 @@ void bezier_inequality_con_mult(unsigned m, double *result, unsigned n, const do
 		bez_curv.push_back({bez_x,bez_y});
 	}
 
+	// Create the discretized Bezier Curve for Vehicle 2
+	for(int i=0; i<bez_curv_pts; i++){
+		double t=double(i)/double(bez_curv_pts-1);
+		double bez_x= pow(1-t, 4)*x0_v2 + 4*pow(1-t,3)*t*x1_v2+6*pow(1-t,2)*pow(t,2)*x[5]  +4*(1-t)*pow(t,3)*x[6] + pow(t,4)*x[8];
+		double bez_y= pow(1-t, 4)*y0_v2 + 4*pow(1-t,3)*t*y1_v2+6*pow(1-t,2)*pow(t,2)*y2_v2 +4*(1-t)*pow(t,3)*x[7] + pow(t,4)*x[9];
+		bez_curv_v2.push_back({bez_x,bez_y});
+	}
+
+
+
 	if(result){
-		for(int i=0;i<=(bez_curv_pts-1)*num_cons+(num_cons-1);i++){
+		for(int i=0;i<=(bez_curv_pts-1)*num_cons_mult+(num_cons_mult-1);i++){
 			result[i]=0;
 		}
 	}
@@ -581,103 +696,272 @@ void bezier_inequality_con_mult(unsigned m, double *result, unsigned n, const do
 		double pdcurvy4=(num_pdcurvy4*pow(pow(x_dot,2)+pow(y_dot,2),2.5)-((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))*5*pow(pow(x_dot,2)+pow(y_dot,2),1.5)*y_dot*pdy4)/pow(pow(x_dot,2)+pow(y_dot,2),5);
 
 
+		// Derivatives for Vehicle 2
+		double x_dot_v2=   4*x0_v2*(pow(t,3)-3*pow(t,2)+3*t-1) 	+ 4*x1_v2*(-4*pow(t,3)+9*pow(t,2)-6*t+1) + 6*x[5]*(4*pow(t,3)-6*pow(t,2)+2*t) + 4*x[6]*(-4*pow(t,3)+3*pow(t,2)) + 4*x[8]*pow(t,3);
+		double x_ddot_v2=  12*x0_v2*(pow(t,2)-2*t+1) 			+ 4*x1_v2*(-12*pow(t,2)+18*t-6) 		 + 6*x[5]*(12*pow(t,2)-12*t+2) 		  + 4*x[6]*(-12*pow(t,2)+6*t) 		+ 12*x[8]*pow(t,2);
+		double x_dddot_v2= 24*x0_v2*(t-1) 						+ 4*x1_v2*(-24*t+18) 					 + 6*x[5]*(24*t-12) 				  + 4*x[6]*(-24*t+6) 				+ 24*x[8]*t;
+
+		double y_dot_v2=	4*y0_v2*(pow(t,3)-3*pow(t,2)+3*t-1) + 4*y1_v2*(-4*pow(t,3)+9*pow(t,2)-6*t+1) + 6*y2_v2*(4*pow(t,3)-6*pow(t,2)+2*t)  + 4*x[7]*(-4*pow(t,3)+3*pow(t,2)) 	+ 4*x[9]*pow(t,3);
+		double y_ddot_v2=	12*y0_v2*(pow(t,2)-2*t+1) 			+ 4*y1_v2*(-12*pow(t,2)+18*t-6) 		 + 6*y2_v2*(12*pow(t,2)-12*t+2) 		+ 4*x[7]*(-12*pow(t,2)+6*t) 		+ 12*x[9]*pow(t,2);
+		double y_dddot_v2= 	24*y0_v2*(t-1) 						+ 4*y1_v2*(-24*t+18) 					 + 6*y2_v2*(24*t-12) 					+ 4*x[7]*(-24*t+6) 					+ 24*x[9]*t;
+
+		double curv_v2=(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2)/(pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),1.5));
+		double curv_dot_v2=((x_dot_v2*y_dddot_v2-y_dot_v2*x_dddot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-3*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2))/pow((pow(x_dot_v2,2)+pow(y_dot_v2,2)),2.5);
+
+		double pcurvx2_v2=((y_ddot_v2*pdx2-y_dot_v2*pddx2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-3*x_dot_v2*pdx2*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2.5);
+		double pcurvx3_v2=((y_ddot_v2*pdx3-y_dot_v2*pddx3)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-3*x_dot_v2*pdx3*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2.5);
+		double pcurvy3_v2=((x_dot_v2*pddy3-x_ddot_v2*pdy3)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-3*y_dot_v2*pdy3*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2.5);
+		double pcurvx4_v2=((y_ddot_v2*pdx4-y_dot_v2*pddx4)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-3*x_dot_v2*pdx4*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2.5);
+		double pcurvy4_v2=((x_dot_v2*pddy4-x_ddot_v2*pdy4)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-3*y_dot_v2*pdy4*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2.5);
+		
+		double num_pdcurvx2_v2=(y_dddot_v2*pdx2-y_dot_v2*pdddx2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))+2*x_dot_v2*pdx2*(x_dot_v2*y_dddot_v2-y_dot_v2*x_dddot_v2)-3*((x_dot_v2*pddx2+x_ddot_v2*pdx2)*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2)+(y_ddot_v2*pdx2-y_dot_v2*pddx2)*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2));
+		double num_pdcurvx3_v2=(y_dddot_v2*pdx3-y_dot_v2*pdddx3)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))+2*x_dot_v2*pdx3*(x_dot_v2*y_dddot_v2-y_dot_v2*x_dddot_v2)-3*((x_dot_v2*pddx3+x_ddot_v2*pdx3)*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2)+(y_ddot_v2*pdx3-y_dot_v2*pddx3)*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2));
+		double num_pdcurvy3_v2=(x_dot_v2*pdddy3-x_dddot_v2*pdy3)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))+2*y_dot_v2*pdy3*(x_dot_v2*y_dddot_v2-y_dot_v2*x_dddot_v2)-3*((y_dot_v2*pddy3+y_ddot_v2*pdy3)*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2)+(x_dot_v2*pddy3-x_ddot_v2*pdy3)*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2));
+		double num_pdcurvx4_v2=(y_dddot_v2*pdx4-y_dot_v2*pdddx4)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))+2*x_dot_v2*pdx4*(x_dot_v2*y_dddot_v2-y_dot_v2*x_dddot_v2)-3*((x_dot_v2*pddx4+x_ddot_v2*pdx4)*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2)+(y_ddot_v2*pdx4-y_dot_v2*pddx4)*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2));
+		double num_pdcurvy4_v2=(x_dot_v2*pdddy4-x_dddot_v2*pdy4)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))+2*y_dot_v2*pdy4*(x_dot_v2*y_dddot_v2-y_dot_v2*x_dddot_v2)-3*((y_dot_v2*pddy4+y_ddot_v2*pdy4)*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2)+(x_dot_v2*pddy4-x_ddot_v2*pdy4)*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2));
+
+		double pdcurvx2_v2=(num_pdcurvx2_v2*pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2.5)-((x_dot_v2*y_dddot_v2-y_dot_v2*x_dddot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-3*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2))*5*pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),1.5)*x_dot_v2*pdx2)/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),5);
+		double pdcurvx3_v2=(num_pdcurvx3_v2*pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2.5)-((x_dot_v2*y_dddot_v2-y_dot_v2*x_dddot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-3*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2))*5*pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),1.5)*x_dot_v2*pdx3)/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),5);
+		double pdcurvy3_v2=(num_pdcurvy3_v2*pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2.5)-((x_dot_v2*y_dddot_v2-y_dot_v2*x_dddot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-3*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2))*5*pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),1.5)*y_dot_v2*pdy3)/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),5);
+		double pdcurvx4_v2=(num_pdcurvx4_v2*pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2.5)-((x_dot_v2*y_dddot_v2-y_dot_v2*x_dddot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-3*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2))*5*pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),1.5)*x_dot_v2*pdx4)/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),5);
+		double pdcurvy4_v2=(num_pdcurvy4_v2*pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2.5)-((x_dot_v2*y_dddot_v2-y_dot_v2*x_dddot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-3*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2))*5*pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),1.5)*y_dot_v2*pdy4)/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),5);
+
+
 		//Max and min velocity
-		result[num_cons*i]=pow(x_dot,2)+pow(y_dot,2)-pow(max_v,2)*pow(t_end,2);
-		result[num_cons*i+1]= -pow(x_dot,2)-pow(y_dot,2)+pow(min_v,2)*pow(t_end,2);
+		result[num_cons_mult*i]=pow(x_dot,2)+pow(y_dot,2)-pow(max_v,2)*pow(t_end,2);
+		result[num_cons_mult*i+1]= -pow(x_dot,2)-pow(y_dot,2)+pow(min_v,2)*pow(t_end,2);
 
 		if(grad){
-	/*M_x2*/grad[num_cons*i*n]=2*x_dot*pdx2;
-	/*M_x3*/grad[num_cons*i*n+1]=2*x_dot*pdx3;
-	/*M_y3*/grad[num_cons*i*n+2]=2*y_dot*pdy3;
-	/*M_x4*/grad[num_cons*i*n+3]=2*x_dot*pdx4;
-	/*M_y4*/grad[num_cons*i*n+4]=2*y_dot*pdy4;
+	/*M_x2*/grad[num_cons_mult*i*n]=2*x_dot*pdx2;
+	/*M_x3*/grad[num_cons_mult*i*n+1]=2*x_dot*pdx3;
+	/*M_y3*/grad[num_cons_mult*i*n+2]=2*y_dot*pdy3;
+	/*M_x4*/grad[num_cons_mult*i*n+3]=2*x_dot*pdx4;
+	/*M_y4*/grad[num_cons_mult*i*n+4]=2*y_dot*pdy4;
 
-	/*m_x2*/grad[(num_cons*i+1)*n]=-2*x_dot*pdx2;
-	/*m_x3*/grad[(num_cons*i+1)*n+1]=-2*x_dot*pdx3;
-	/*m_y3*/grad[(num_cons*i+1)*n+2]=-2*y_dot*pdy3;
-	/*m_x4*/grad[(num_cons*i+1)*n+3]=-2*x_dot*pdx4;
-	/*m_y4*/grad[(num_cons*i+1)*n+4]=-2*y_dot*pdy4;
+	/*m_x2*/grad[(num_cons_mult*i+1)*n]=-2*x_dot*pdx2;
+	/*m_x3*/grad[(num_cons_mult*i+1)*n+1]=-2*x_dot*pdx3;
+	/*m_y3*/grad[(num_cons_mult*i+1)*n+2]=-2*y_dot*pdy3;
+	/*m_x4*/grad[(num_cons_mult*i+1)*n+3]=-2*x_dot*pdx4;
+	/*m_y4*/grad[(num_cons_mult*i+1)*n+4]=-2*y_dot*pdy4;
 		}
 
 		//Max change (+ & -) in velocity
-		result[num_cons*i+2]=(pow(x_dot*x_ddot+y_dot*y_ddot,2)/(pow(x_dot,2)+pow(y_dot,2)))-pow(max_dv,2)*pow(t_end,4);
-		result[num_cons*i+3]=-(pow(x_dot*x_ddot+y_dot*y_ddot,2)/(pow(x_dot,2)+pow(y_dot,2)))-pow(max_dv,2)*pow(t_end,4);
+		result[num_cons_mult*i+2]=(pow(x_dot*x_ddot+y_dot*y_ddot,2)/(pow(x_dot,2)+pow(y_dot,2)))-pow(max_dv,2)*pow(t_end,4);
+		result[num_cons_mult*i+3]=-(pow(x_dot*x_ddot+y_dot*y_ddot,2)/(pow(x_dot,2)+pow(y_dot,2)))-pow(max_dv,2)*pow(t_end,4);
 
 
 		if(grad){
-	/*+_x2*/grad[(num_cons*i+2)*n]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx2*x_ddot+pddx2*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx2*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
-	/*+_x3*/grad[(num_cons*i+2)*n+1]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx3*x_ddot+pddx3*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx3*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
-	/*+_y3*/grad[(num_cons*i+2)*n+2]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdy3*y_ddot+pddy3*y_dot)*(pow(x_dot,2)+pow(y_dot,2))-y_dot*pdy3*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
-	/*+_x4*/grad[(num_cons*i+2)*n+3]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx4*x_ddot+pddx4*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
-	/*+_y4*/grad[(num_cons*i+2)*n+4]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdy4*y_ddot+pddy4*y_dot)*(pow(x_dot,2)+pow(y_dot,2))-y_dot*pdy4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
+	/*+_x2*/grad[(num_cons_mult*i+2)*n]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx2*x_ddot+pddx2*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx2*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
+	/*+_x3*/grad[(num_cons_mult*i+2)*n+1]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx3*x_ddot+pddx3*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx3*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
+	/*+_y3*/grad[(num_cons_mult*i+2)*n+2]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdy3*y_ddot+pddy3*y_dot)*(pow(x_dot,2)+pow(y_dot,2))-y_dot*pdy3*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
+	/*+_x4*/grad[(num_cons_mult*i+2)*n+3]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx4*x_ddot+pddx4*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
+	/*+_y4*/grad[(num_cons_mult*i+2)*n+4]=2*(x_dot*x_ddot+y_dot*y_ddot)*((pdy4*y_ddot+pddy4*y_dot)*(pow(x_dot,2)+pow(y_dot,2))-y_dot*pdy4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2);
 
-	/*-_x2*/grad[(num_cons*i+3)*n]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx2*x_ddot+pddx2*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx2*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
-	/*-_x3*/grad[(num_cons*i+3)*n+1]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx3*x_ddot+pddx3*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx3*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
-	/*-_y3*/grad[(num_cons*i+3)*n+2]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdy3*y_ddot+pddy3*y_dot)*(pow(x_dot,2)+pow(y_dot,2))-y_dot*pdy3*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
-	/*-_x4*/grad[(num_cons*i+3)*n+3]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx4*x_ddot+pddx4*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
-	/*-_y4*/grad[(num_cons*i+3)*n+4]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdy4*y_ddot+pddy4*y_dot)*(pow(x_dot,2)+pow(y_dot,2))-y_dot*pdy4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
+	/*-_x2*/grad[(num_cons_mult*i+3)*n]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx2*x_ddot+pddx2*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx2*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
+	/*-_x3*/grad[(num_cons_mult*i+3)*n+1]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx3*x_ddot+pddx3*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx3*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
+	/*-_y3*/grad[(num_cons_mult*i+3)*n+2]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdy3*y_ddot+pddy3*y_dot)*(pow(x_dot,2)+pow(y_dot,2))-y_dot*pdy3*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
+	/*-_x4*/grad[(num_cons_mult*i+3)*n+3]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdx4*x_ddot+pddx4*x_dot)*(pow(x_dot,2)+pow(y_dot,2))-x_dot*pdx4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
+	/*-_y4*/grad[(num_cons_mult*i+3)*n+4]=-(2*(x_dot*x_ddot+y_dot*y_ddot)*((pdy4*y_ddot+pddy4*y_dot)*(pow(x_dot,2)+pow(y_dot,2))-y_dot*pdy4*(x_dot*x_ddot+y_dot*y_ddot))/pow(pow(x_dot,2)+pow(y_dot,2),2));
 		}
 
 		//Max (+ & -) curvature
-		result[num_cons*i+4]=wheelbase*curv-tan(max_delta);
-		result[num_cons*i+5]=-wheelbase*curv-tan(max_delta);
+		result[num_cons_mult*i+4]=wheelbase*curv-tan(max_delta);
+		result[num_cons_mult*i+5]=-wheelbase*curv-tan(max_delta);
 
 		if(grad){
-	/*+_x2*/grad[(num_cons*i+4)*n]=wheelbase*pcurvx2;
-	/*+_x3*/grad[(num_cons*i+4)*n+1]=wheelbase*pcurvx3;
-	/*+_y3*/grad[(num_cons*i+4)*n+2]=wheelbase*pcurvy3;
-	/*+_x4*/grad[(num_cons*i+4)*n+3]=wheelbase*pcurvx4;
-	/*+_y4*/grad[(num_cons*i+4)*n+4]=wheelbase*pcurvy4;
+	/*+_x2*/grad[(num_cons_mult*i+4)*n]=wheelbase*pcurvx2;
+	/*+_x3*/grad[(num_cons_mult*i+4)*n+1]=wheelbase*pcurvx3;
+	/*+_y3*/grad[(num_cons_mult*i+4)*n+2]=wheelbase*pcurvy3;
+	/*+_x4*/grad[(num_cons_mult*i+4)*n+3]=wheelbase*pcurvx4;
+	/*+_y4*/grad[(num_cons_mult*i+4)*n+4]=wheelbase*pcurvy4;
 
-	/*-_x2*/grad[(num_cons*i+5)*n]=-wheelbase*pcurvx2;
-	/*-_x3*/grad[(num_cons*i+5)*n+1]=-wheelbase*pcurvx3;
-	/*-_y3*/grad[(num_cons*i+5)*n+2]=-wheelbase*pcurvy3;
-	/*-_x4*/grad[(num_cons*i+5)*n+3]=-wheelbase*pcurvx4;
-	/*-_y4*/grad[(num_cons*i+5)*n+4]=-wheelbase*pcurvy4;
+	/*-_x2*/grad[(num_cons_mult*i+5)*n]=-wheelbase*pcurvx2;
+	/*-_x3*/grad[(num_cons_mult*i+5)*n+1]=-wheelbase*pcurvx3;
+	/*-_y3*/grad[(num_cons_mult*i+5)*n+2]=-wheelbase*pcurvy3;
+	/*-_x4*/grad[(num_cons_mult*i+5)*n+3]=-wheelbase*pcurvx4;
+	/*-_y4*/grad[(num_cons_mult*i+5)*n+4]=-wheelbase*pcurvy4;
 		}
 
 		//Max change (+ & -) in curvature
-		result[num_cons*i+6]=wheelbase*curv_dot/(1+pow(wheelbase*curv,2))-max_ddelta*t_end;
-		result[num_cons*i+7]=-wheelbase*curv_dot/(1+pow(wheelbase*curv,2))-max_ddelta*t_end;
+		result[num_cons_mult*i+6]=wheelbase*curv_dot/(1+pow(wheelbase*curv,2))-max_ddelta*t_end;
+		result[num_cons_mult*i+7]=-wheelbase*curv_dot/(1+pow(wheelbase*curv,2))-max_ddelta*t_end;
 
 		if(grad){
-	/*+_x2*/grad[(num_cons*i+6)*n]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx2-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx2;
-	/*+_x3*/grad[(num_cons*i+6)*n+1]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx3-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx3;
-	/*+_y3*/grad[(num_cons*i+6)*n+2]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvy3-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvy3;
-	/*+_x4*/grad[(num_cons*i+6)*n+3]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx4-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx4;
-	/*+_y4*/grad[(num_cons*i+6)*n+4]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvy4-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvy4;
+	/*+_x2*/grad[(num_cons_mult*i+6)*n]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx2-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx2;
+	/*+_x3*/grad[(num_cons_mult*i+6)*n+1]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx3-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx3;
+	/*+_y3*/grad[(num_cons_mult*i+6)*n+2]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvy3-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvy3;
+	/*+_x4*/grad[(num_cons_mult*i+6)*n+3]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx4-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx4;
+	/*+_y4*/grad[(num_cons_mult*i+6)*n+4]=wheelbase/(1+pow(wheelbase*curv,2))*pdcurvy4-2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvy4;
 
-	/*-_x2*/grad[(num_cons*i+7)*n]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx2+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx2;
-	/*-_x3*/grad[(num_cons*i+7)*n+1]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx3+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx3;
-	/*-_y3*/grad[(num_cons*i+7)*n+2]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvy3+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvy3;
-	/*-_x4*/grad[(num_cons*i+7)*n+3]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx4+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx4;
-	/*-_y4*/grad[(num_cons*i+7)*n+4]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvy4+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvy4;
+	/*-_x2*/grad[(num_cons_mult*i+7)*n]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx2+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx2;
+	/*-_x3*/grad[(num_cons_mult*i+7)*n+1]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx3+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx3;
+	/*-_y3*/grad[(num_cons_mult*i+7)*n+2]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvy3+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvy3;
+	/*-_x4*/grad[(num_cons_mult*i+7)*n+3]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvx4+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvx4;
+	/*-_y4*/grad[(num_cons_mult*i+7)*n+4]=-wheelbase/(1+pow(wheelbase*curv,2))*pdcurvy4+2*pow(wheelbase,3)*curv*curv_dot/pow(1+pow(wheelbase*curv,2),2)*pcurvy4;
 		}
 
 
 		//Smooth minimum obstacle distance
 		for(int j=0;j<cols-num_param_pairs;j++){
 			double dist1= pow(pow(bez_curv[i][0]-xopt[0][j+num_param_pairs],2)+pow(bez_curv[i][1]-xopt[1][j+num_param_pairs],2),0.5); //Euclidean distance
-			result[9*i+8]=result[9*i+8]+exp(-1.0*double(bez_beta)*dist1);
+			result[num_cons_mult*i+8]=result[num_cons_mult*i+8]+exp(-1.0*double(bez_beta)*dist1);
 			
 
 			if(grad){
-		/*x2*/	grad[(num_cons*i+8)*n]=grad[(num_cons*i+8)*n]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px2;
-		/*x3*/	grad[(num_cons*i+8)*n+1]=grad[(num_cons*i+8)*n+1]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px3;
-		/*y3*/	grad[(num_cons*i+8)*n+2]=grad[(num_cons*i+8)*n+2]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+num_param_pairs])/dist1*py3;
-		/*x4*/	grad[(num_cons*i+8)*n+3]=grad[(num_cons*i+8)*n+3]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px4;
-		/*y4*/	grad[(num_cons*i+8)*n+4]=grad[(num_cons*i+8)*n+4]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+num_param_pairs])/dist1*py4;
+		/*x2*/	grad[(num_cons_mult*i+8)*n]=grad[(num_cons_mult*i+8)*n]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px2;
+		/*x3*/	grad[(num_cons_mult*i+8)*n+1]=grad[(num_cons_mult*i+8)*n+1]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px3;
+		/*y3*/	grad[(num_cons_mult*i+8)*n+2]=grad[(num_cons_mult*i+8)*n+2]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+num_param_pairs])/dist1*py3;
+		/*x4*/	grad[(num_cons_mult*i+8)*n+3]=grad[(num_cons_mult*i+8)*n+3]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-xopt[0][j+num_param_pairs])/dist1*px4;
+		/*y4*/	grad[(num_cons_mult*i+8)*n+4]=grad[(num_cons_mult*i+8)*n+4]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-xopt[1][j+num_param_pairs])/dist1*py4;
 			}
 		}
 		if(grad){
-			grad[(num_cons*i+8)*n]=-grad[(num_cons*i+8)*n]/result[num_cons*i+8];
-			grad[(num_cons*i+8)*n+1]=-grad[(num_cons*i+8)*n+1]/result[num_cons*i+8];
-			grad[(num_cons*i+8)*n+2]=-grad[(num_cons*i+8)*n+2]/result[num_cons*i+8];
-			grad[(num_cons*i+8)*n+3]=-grad[(num_cons*i+8)*n+3]/result[num_cons*i+8];
-			grad[(num_cons*i+8)*n+4]=-grad[(num_cons*i+8)*n+4]/result[num_cons*i+8];
+			grad[(num_cons_mult*i+8)*n]=-grad[(num_cons_mult*i+8)*n]/result[num_cons_mult*i+8];
+			grad[(num_cons_mult*i+8)*n+1]=-grad[(num_cons_mult*i+8)*n+1]/result[num_cons_mult*i+8];
+			grad[(num_cons_mult*i+8)*n+2]=-grad[(num_cons_mult*i+8)*n+2]/result[num_cons_mult*i+8];
+			grad[(num_cons_mult*i+8)*n+3]=-grad[(num_cons_mult*i+8)*n+3]/result[num_cons_mult*i+8];
+			grad[(num_cons_mult*i+8)*n+4]=-grad[(num_cons_mult*i+8)*n+4]/result[num_cons_mult*i+8];
 		}
-		result[num_cons*i+8]=1.0/double(bez_beta)*log(result[num_cons*i+8])+bez_min_dist;
+		result[num_cons_mult*i+8]=1.0/double(bez_beta)*log(result[num_cons_mult*i+8])+bez_min_dist;
 		
+
+
+		// Constraints for vehicle 2
+		//Max and min velocity
+		result[num_cons_mult*i+9] =pow(x_dot_v2,2)+pow(y_dot_v2,2)-pow(max_v,2)*pow(t_end,2);
+		result[num_cons_mult*i+10]= -pow(x_dot_v2,2)-pow(y_dot_v2,2)+pow(min_v,2)*pow(t_end,2);
+
+		if(grad){
+	/*M_x2*/grad[(num_cons_mult*i+9)*n+5]=2*x_dot_v2*pdx2;
+	/*M_x3*/grad[(num_cons_mult*i+9)*n+6]=2*x_dot_v2*pdx3;
+	/*M_y3*/grad[(num_cons_mult*i+9)*n+7]=2*y_dot_v2*pdy3;
+	/*M_x4*/grad[(num_cons_mult*i+9)*n+8]=2*x_dot_v2*pdx4;
+	/*M_y4*/grad[(num_cons_mult*i+9)*n+9]=2*y_dot_v2*pdy4;
+
+	/*m_x2*/grad[(num_cons_mult*i+10)*n+5]=-2*x_dot_v2*pdx2;
+	/*m_x3*/grad[(num_cons_mult*i+10)*n+6]=-2*x_dot_v2*pdx3;
+	/*m_y3*/grad[(num_cons_mult*i+10)*n+7]=-2*y_dot_v2*pdy3;
+	/*m_x4*/grad[(num_cons_mult*i+10)*n+8]=-2*x_dot_v2*pdx4;
+	/*m_y4*/grad[(num_cons_mult*i+10)*n+9]=-2*y_dot_v2*pdy4;
+		}
+
+		//Max change (+ & -) in velocity
+		result[num_cons_mult*i+11]= (pow(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2,2)/(pow(x_dot_v2,2)+pow(y_dot_v2,2)))-pow(max_dv,2)*pow(t_end,4);
+		result[num_cons_mult*i+12]=-(pow(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2,2)/(pow(x_dot_v2,2)+pow(y_dot_v2,2)))-pow(max_dv,2)*pow(t_end,4);
+
+
+		if(grad){
+	/*+_x2*/grad[(num_cons_mult*i+11)*n+5]=2*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*((pdx2*x_ddot_v2+pddx2*x_dot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-x_dot_v2*pdx2*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2);
+	/*+_x3*/grad[(num_cons_mult*i+11)*n+6]=2*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*((pdx3*x_ddot_v2+pddx3*x_dot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-x_dot_v2*pdx3*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2);
+	/*+_y3*/grad[(num_cons_mult*i+11)*n+7]=2*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*((pdy3*y_ddot_v2+pddy3*y_dot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-y_dot_v2*pdy3*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2);
+	/*+_x4*/grad[(num_cons_mult*i+11)*n+8]=2*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*((pdx4*x_ddot_v2+pddx4*x_dot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-x_dot_v2*pdx4*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2);
+	/*+_y4*/grad[(num_cons_mult*i+11)*n+9]=2*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*((pdy4*y_ddot_v2+pddy4*y_dot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-y_dot_v2*pdy4*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2);
+
+	/*-_x2*/grad[(num_cons_mult*i+12)*n+5]=-(2*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*((pdx2*x_ddot_v2+pddx2*x_dot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-x_dot_v2*pdx2*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2));
+	/*-_x3*/grad[(num_cons_mult*i+12)*n+6]=-(2*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*((pdx3*x_ddot_v2+pddx3*x_dot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-x_dot_v2*pdx3*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2));
+	/*-_y3*/grad[(num_cons_mult*i+12)*n+7]=-(2*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*((pdy3*y_ddot_v2+pddy3*y_dot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-y_dot_v2*pdy3*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2));
+	/*-_x4*/grad[(num_cons_mult*i+12)*n+8]=-(2*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*((pdx4*x_ddot_v2+pddx4*x_dot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-x_dot_v2*pdx4*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2));
+	/*-_y4*/grad[(num_cons_mult*i+12)*n+9]=-(2*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*((pdy4*y_ddot_v2+pddy4*y_dot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-y_dot_v2*pdy4*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2))/pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),2));
+		}
+
+		//Max (+ & -) curvature
+		result[num_cons_mult*i+13]=wheelbase*curv_v2-tan(max_delta);
+		result[num_cons_mult*i+14]=-wheelbase*curv_v2-tan(max_delta);
+
+		if(grad){
+	/*+_x2*/grad[(num_cons_mult*i+13)*n+5]=wheelbase*pcurvx2_v2;
+	/*+_x3*/grad[(num_cons_mult*i+13)*n+6]=wheelbase*pcurvx3_v2;
+	/*+_y3*/grad[(num_cons_mult*i+13)*n+7]=wheelbase*pcurvy3_v2;
+	/*+_x4*/grad[(num_cons_mult*i+13)*n+8]=wheelbase*pcurvx4_v2;
+	/*+_y4*/grad[(num_cons_mult*i+13)*n+9]=wheelbase*pcurvy4_v2;
+
+	/*-_x2*/grad[(num_cons_mult*i+14)*n+5]=-wheelbase*pcurvx2_v2;
+	/*-_x3*/grad[(num_cons_mult*i+14)*n+6]=-wheelbase*pcurvx3_v2;
+	/*-_y3*/grad[(num_cons_mult*i+14)*n+7]=-wheelbase*pcurvy3_v2;
+	/*-_x4*/grad[(num_cons_mult*i+14)*n+8]=-wheelbase*pcurvx4_v2;
+	/*-_y4*/grad[(num_cons_mult*i+14)*n+9]=-wheelbase*pcurvy4_v2;
+		}
+
+		//Max change (+ & -) in curvature
+		result[num_cons_mult*i+15]= wheelbase*curv_dot_v2/(1+pow(wheelbase*curv_v2,2))-max_ddelta*t_end;
+		result[num_cons_mult*i+16]=-wheelbase*curv_dot_v2/(1+pow(wheelbase*curv_v2,2))-max_ddelta*t_end;
+
+		if(grad){
+	/*+_x2*/grad[(num_cons_mult*i+15)*n+5]=wheelbase/(1+pow(wheelbase*curv_v2,2))*pdcurvx2_v2-2*pow(wheelbase,3)*curv_v2*curv_dot_v2/pow(1+pow(wheelbase*curv_v2,2),2)*pcurvx2_v2;
+	/*+_x3*/grad[(num_cons_mult*i+15)*n+6]=wheelbase/(1+pow(wheelbase*curv_v2,2))*pdcurvx3_v2-2*pow(wheelbase,3)*curv_v2*curv_dot_v2/pow(1+pow(wheelbase*curv_v2,2),2)*pcurvx3_v2;
+	/*+_y3*/grad[(num_cons_mult*i+15)*n+7]=wheelbase/(1+pow(wheelbase*curv_v2,2))*pdcurvy3_v2-2*pow(wheelbase,3)*curv_v2*curv_dot_v2/pow(1+pow(wheelbase*curv_v2,2),2)*pcurvy3_v2;
+	/*+_x4*/grad[(num_cons_mult*i+15)*n+8]=wheelbase/(1+pow(wheelbase*curv_v2,2))*pdcurvx4_v2-2*pow(wheelbase,3)*curv_v2*curv_dot_v2/pow(1+pow(wheelbase*curv_v2,2),2)*pcurvx4_v2;
+	/*+_y4*/grad[(num_cons_mult*i+15)*n+9]=wheelbase/(1+pow(wheelbase*curv_v2,2))*pdcurvy4_v2-2*pow(wheelbase,3)*curv_v2*curv_dot_v2/pow(1+pow(wheelbase*curv_v2,2),2)*pcurvy4_v2;
+
+	/*-_x2*/grad[(num_cons_mult*i+16)*n+5]=-wheelbase/(1+pow(wheelbase*curv_v2,2))*pdcurvx2_v2+2*pow(wheelbase,3)*curv_v2*curv_dot_v2/pow(1+pow(wheelbase*curv_v2,2),2)*pcurvx2_v2;
+	/*-_x3*/grad[(num_cons_mult*i+16)*n+6]=-wheelbase/(1+pow(wheelbase*curv_v2,2))*pdcurvx3_v2+2*pow(wheelbase,3)*curv_v2*curv_dot_v2/pow(1+pow(wheelbase*curv_v2,2),2)*pcurvx3_v2;
+	/*-_y3*/grad[(num_cons_mult*i+16)*n+7]=-wheelbase/(1+pow(wheelbase*curv_v2,2))*pdcurvy3_v2+2*pow(wheelbase,3)*curv_v2*curv_dot_v2/pow(1+pow(wheelbase*curv_v2,2),2)*pcurvy3_v2;
+	/*-_x4*/grad[(num_cons_mult*i+16)*n+8]=-wheelbase/(1+pow(wheelbase*curv_v2,2))*pdcurvx4_v2+2*pow(wheelbase,3)*curv_v2*curv_dot_v2/pow(1+pow(wheelbase*curv_v2,2),2)*pcurvx4_v2;
+	/*-_y4*/grad[(num_cons_mult*i+16)*n+9]=-wheelbase/(1+pow(wheelbase*curv_v2,2))*pdcurvy4_v2+2*pow(wheelbase,3)*curv_v2*curv_dot_v2/pow(1+pow(wheelbase*curv_v2,2),2)*pcurvy4_v2;
+		}
+
+
+		// // Transform the bezier curve for the second vehicle to the ego frame
+		// bez_curv_v2 = transform_points_to_ego_frame(bez_curv_v2, x0_v2, y0_v2, theta_v2);
+
+		//Smooth minimum obstacle distance
+		for(int j=0;j<cols-num_param_pairs;j++){
+			double dist1= pow(pow(bez_curv_v2[i][0]-xopt[0][j+num_param_pairs],2)+pow(bez_curv_v2[i][1]-xopt[1][j+num_param_pairs],2),0.5); //Euclidean distance
+			result[num_cons_mult*i+17]=result[num_cons_mult*i+17]+exp(-1.0*double(bez_beta)*dist1);
+			
+
+			if(grad){
+		/*x2*/	grad[(num_cons_mult*i+17)*n+5]=grad[(num_cons_mult*i+17)*n+5]+exp(-1*double(bez_beta)*dist1)*(bez_curv_v2[i][0]-xopt[0][j+num_param_pairs])/dist1*px2;
+		/*x3*/	grad[(num_cons_mult*i+17)*n+6]=grad[(num_cons_mult*i+17)*n+6]+exp(-1*double(bez_beta)*dist1)*(bez_curv_v2[i][0]-xopt[0][j+num_param_pairs])/dist1*px3;
+		/*y3*/	grad[(num_cons_mult*i+17)*n+7]=grad[(num_cons_mult*i+17)*n+7]+exp(-1*double(bez_beta)*dist1)*(bez_curv_v2[i][1]-xopt[1][j+num_param_pairs])/dist1*py3;
+		/*x4*/	grad[(num_cons_mult*i+17)*n+8]=grad[(num_cons_mult*i+17)*n+8]+exp(-1*double(bez_beta)*dist1)*(bez_curv_v2[i][0]-xopt[0][j+num_param_pairs])/dist1*px4;
+		/*y4*/	grad[(num_cons_mult*i+17)*n+9]=grad[(num_cons_mult*i+17)*n+9]+exp(-1*double(bez_beta)*dist1)*(bez_curv_v2[i][1]-xopt[1][j+num_param_pairs])/dist1*py4;
+			}
+		}
+		if(grad){
+			grad[(num_cons_mult*i+17)*n+5]=-grad[(num_cons_mult*i+17)*n+5]/result[num_cons_mult*i+17];
+			grad[(num_cons_mult*i+17)*n+6]=-grad[(num_cons_mult*i+17)*n+6]/result[num_cons_mult*i+17];
+			grad[(num_cons_mult*i+17)*n+7]=-grad[(num_cons_mult*i+17)*n+7]/result[num_cons_mult*i+17];
+			grad[(num_cons_mult*i+17)*n+8]=-grad[(num_cons_mult*i+17)*n+8]/result[num_cons_mult*i+17];
+			grad[(num_cons_mult*i+17)*n+9]=-grad[(num_cons_mult*i+17)*n+9]/result[num_cons_mult*i+17];
+		}
+		//result[num_cons_mult*i+17]=1.0/double(bez_beta)*log(result[num_cons_mult*i+17])+bez_min_dist;
+		
+		
+		// Minimum Distance between the vehicles
+		for(int j=0;j<bez_curv_pts;j++){
+			double dist1= pow(pow(bez_curv[i][0]-bez_curv_v2[j][0],2)+pow(bez_curv[i][1]-bez_curv_v2[j][1],2),0.5); //Euclidean distance
+			result[num_cons_mult*i+17]=result[num_cons_mult*i+17]+exp(-1.0*double(bez_beta)*dist1);
+			
+
+			if(grad){
+		/*x2*/	grad[(num_cons_mult*i+17)*n+0]=grad[(num_cons_mult*i+17)*n+0]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-bez_curv_v2[j][0])/dist1*px2;
+		/*x3*/	grad[(num_cons_mult*i+17)*n+1]=grad[(num_cons_mult*i+17)*n+1]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-bez_curv_v2[j][0])/dist1*px3;
+		/*y3*/	grad[(num_cons_mult*i+17)*n+2]=grad[(num_cons_mult*i+17)*n+2]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-bez_curv_v2[j][1])/dist1*py3;
+		/*x4*/	grad[(num_cons_mult*i+17)*n+3]=grad[(num_cons_mult*i+17)*n+3]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-bez_curv_v2[j][0])/dist1*px4;
+		/*y4*/	grad[(num_cons_mult*i+17)*n+4]=grad[(num_cons_mult*i+17)*n+4]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-bez_curv_v2[j][1])/dist1*py4;
+		/*x2*/	grad[(num_cons_mult*i+17)*n+5]=grad[(num_cons_mult*i+17)*n+5]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-bez_curv_v2[j][0])/dist1*-px2;
+		/*x3*/	grad[(num_cons_mult*i+17)*n+6]=grad[(num_cons_mult*i+17)*n+6]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-bez_curv_v2[j][0])/dist1*-px3;
+		/*y3*/	grad[(num_cons_mult*i+17)*n+7]=grad[(num_cons_mult*i+17)*n+7]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-bez_curv_v2[j][1])/dist1*-py3;
+		/*x4*/	grad[(num_cons_mult*i+17)*n+8]=grad[(num_cons_mult*i+17)*n+8]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][0]-bez_curv_v2[j][0])/dist1*-px4;
+		/*y4*/	grad[(num_cons_mult*i+17)*n+9]=grad[(num_cons_mult*i+17)*n+9]+exp(-1*double(bez_beta)*dist1)*(bez_curv[i][1]-bez_curv_v2[j][1])/dist1*-py4;
+			}
+		}
+		if(grad){
+			grad[(num_cons_mult*i+17)*n+0]=-grad[(num_cons_mult*i+17)*n+0]/result[num_cons_mult*i+17];
+			grad[(num_cons_mult*i+17)*n+1]=-grad[(num_cons_mult*i+17)*n+1]/result[num_cons_mult*i+17];
+			grad[(num_cons_mult*i+17)*n+2]=-grad[(num_cons_mult*i+17)*n+2]/result[num_cons_mult*i+17];
+			grad[(num_cons_mult*i+17)*n+3]=-grad[(num_cons_mult*i+17)*n+3]/result[num_cons_mult*i+17];
+			grad[(num_cons_mult*i+17)*n+4]=-grad[(num_cons_mult*i+17)*n+4]/result[num_cons_mult*i+17];
+			grad[(num_cons_mult*i+17)*n+5]=-grad[(num_cons_mult*i+17)*n+5]/result[num_cons_mult*i+17];
+			grad[(num_cons_mult*i+17)*n+6]=-grad[(num_cons_mult*i+17)*n+6]/result[num_cons_mult*i+17];
+			grad[(num_cons_mult*i+17)*n+7]=-grad[(num_cons_mult*i+17)*n+7]/result[num_cons_mult*i+17];
+			grad[(num_cons_mult*i+17)*n+8]=-grad[(num_cons_mult*i+17)*n+8]/result[num_cons_mult*i+17];
+			grad[(num_cons_mult*i+17)*n+9]=-grad[(num_cons_mult*i+17)*n+9]/result[num_cons_mult*i+17];
+		}
+		result[num_cons_mult*i+17]=1.0/double(bez_beta)*log(result[num_cons_mult*i+17])+bez_min_dist;
+
+
 	}
 
 }
@@ -724,6 +1008,7 @@ class GapBarrier
 		ros::Publisher obst_mark;
 		ros::Publisher scan_gap;
 		ros::Publisher bez_mark;
+		ros::Publisher ext_bez_mark;
 		ros::Publisher bez_guess_mark;
 		ros::Publisher gplane_pub;
 		ros::Publisher gplane_pts_pub;
@@ -772,6 +1057,7 @@ class GapBarrier
 		visualization_msgs::Marker obst;
 		visualization_msgs::Marker scan_gap_marker;
 		visualization_msgs::Marker bez;
+		visualization_msgs::Marker ext_bez;
 		visualization_msgs::Marker bez_guess;
 		visualization_msgs::Marker gplane_marker;
 		visualization_msgs::Marker gplane_pts_marker;
@@ -850,13 +1136,17 @@ class GapBarrier
 		double stop_dist_decay=0;
 		double pot_field_factor_F_QBMPC=0;
 		double velocity_factor_F_QBMPC=0;
+		float disp_ext_factor;
+		float veh_width;
 
 		// Communication
 		f1tenth_simulator::SubObsData submsg;
 		std::vector<std::vector<double>> ext_sub_obs;
+		f1tenth_simulator::PathData ext_path;
 		double ext_rel_x=0, ext_rel_y=0, ext_rel_theta=0;
 		bool sim_pose_valid=false;
 		bool ext_tf_relative_valid=false;
+		int num_vehicles=1; // For simulation
 
 		ros::Time timestamp_tf1; ros::Time timestamp_tf2;
 		ros::Time timestamp_cam1; ros::Time timestamp_cam2;
@@ -935,6 +1225,7 @@ class GapBarrier
 			nf.getParam("tf_prefix", tf_prefix);
 
 			nf.getParam("vehicle_prefix", vehicle_prefix);
+			nf.getParam("num_vehicles", num_vehicles);
 
 			// Get an external vehicle's frame prefix
 			if(tf_prefix != ""){
@@ -1031,6 +1322,8 @@ class GapBarrier
 			nf.getParam("stop_dist_decay", stop_dist_decay);
 			nf.getParam("pot_field_factor_F_QBMPC", pot_field_factor_F_QBMPC);
 			nf.getParam("velocity_factor_F_QBMPC", velocity_factor_F_QBMPC);
+			nf.getParam("disp_ext_factor", disp_ext_factor);
+			nf.getParam("width", veh_width);
 
 			//camera
 			nf.getParam("use_camera", use_camera);
@@ -1087,6 +1380,7 @@ class GapBarrier
 			obst_mark=nf.advertise<visualization_msgs::Marker>("obst",2);
 			scan_gap=nf.advertise<visualization_msgs::Marker>("scan_gap",2);
 			bez_mark=nf.advertise<visualization_msgs::Marker>("bez",2);
+			ext_bez_mark=nf.advertise<visualization_msgs::Marker>("ext_bez",2);
 			bez_guess_mark=nf.advertise<visualization_msgs::Marker>("bez_guess",2);
 			gplane_pub = nf.advertise<visualization_msgs::Marker>("gplane_marker",2);
 			gplane_pts_pub = nf.advertise<visualization_msgs::Marker>("gplane_pts_marker",2);
@@ -1095,7 +1389,7 @@ class GapBarrier
 			vehicle_detect=nf.advertise<visualization_msgs::Marker>("vehicle_detect",2);
 			driver_pub = nf.advertise<ackermann_msgs::AckermannDriveStamped>(drive_topic, 1);
 			subobs_pub = nf.advertise<f1tenth_simulator::SubObsData>(vehicle_prefix + "subobs", 2);
-			path_pub = nf.advertise<f1tenth_simulator::SubObsData>(vehicle_prefix + "path", 2);
+			path_pub = nf.advertise<f1tenth_simulator::PathData>(vehicle_prefix + "path", 2);
             ext_obst_mark = nf.advertise<visualization_msgs::Marker>("external_obstacles", 2);
 
 			if(use_camera)
@@ -2012,7 +2306,7 @@ class GapBarrier
 							// Exit if the total distance is larger than the required angle
 							double ang = std::abs(lidar_angles[i]-lidar_angles[i-offset]);
 							double dist = 2*close_pt*sin(ang/2); 	// Chord Length
-							if(dist > 1.5*veh_det_width){
+							if(dist > disp_ext_factor*veh_width){
 								in_angle = true; 
 							}
 						}
@@ -2033,7 +2327,7 @@ class GapBarrier
 							// Exit if the total distance is larger than the required angle
 							double ang = std::abs(lidar_angles[i]-lidar_angles[i+offset]);
 							double dist = 2*close_pt*sin(ang/2); 	// Chord Length
-							if(dist > 1.5*veh_det_width){
+							if(dist > disp_ext_factor*veh_width){
 								in_angle = true; 
 							}
 						}
@@ -2407,9 +2701,50 @@ class GapBarrier
 			
 		}
 
-		void ext_path_callback(const f1tenth_simulator::PathData & path_msg){
-			
-			
+		void ext_path_publisher(std::vector<double> xptplot, std::vector<double> yptplot){
+			f1tenth_simulator::PathData path_msg;
+			path_msg.header.frame_id = base_frame;
+			path_msg.header.stamp = ros::Time::now();
+			for(int i = 0; i < xptplot.size(); i++){
+				path_msg.xptplot.push_back(xptplot[i]);
+				path_msg.yptplot.push_back(yptplot[i]);
+			}
+			path_msg.time_horizon = bez_t_end;
+			//path_msg.num_disc = xptplot.size();
+			path_msg.fixed = false;
+			path_pub.publish(path_msg);
+		}
+
+		void path_callback(const f1tenth_simulator::PathData & path_msg){
+			// The incoming points are in the external vehicle's frame. Convert and
+			// retain them in this vehicle's frame, preserving the path metadata.
+			// double rel_x, rel_y, rel_theta;
+			// if(ext_tf_relative_valid){
+			// 	rel_x=ext_rel_x; rel_y=ext_rel_y; rel_theta=ext_rel_theta;
+			// }
+			// else if(!car_detects.empty() && car_detects[0].init==2){
+			// 	rel_x=car_detects[0].state[0];
+			// 	rel_y=car_detects[0].state[1];
+			// 	rel_theta=car_detects[0].state[2];
+			// }
+			// else{
+			// 	ROS_WARN_THROTTLE(2.0, "External vehicle pose unavailable; cannot transform received path");
+			// 	return;
+			//}
+
+			ext_path=path_msg;
+			ext_path.header.frame_id=base_frame;
+			ext_path.header.stamp=ros::Time::now();
+			// const double c=cos(rel_theta), s=sin(rel_theta);
+			// const size_t num_points=std::min(ext_path.xptplot.size(), ext_path.yptplot.size());
+			// for(size_t i=0; i<num_points; ++i){
+			// 	const double x=path_msg.xptplot[i], y=path_msg.yptplot[i];
+			// 	ext_path.xptplot[i]=rel_x+c*x-s*y;
+			// 	ext_path.yptplot[i]=rel_y+s*x+c*y;
+			// }
+			// Transform these values when performing optimizaiton
+			ext_path.xptplot = path_msg.xptplot;
+			ext_path.yptplot = path_msg.yptplot;
 		}
 
 		void subsampled_obstacle_publisher(std::vector<std::vector<double>> sub_obstacles){
@@ -2564,7 +2899,8 @@ class GapBarrier
 				double heading_angle;
 
 
-				double startxplot[nMPC],startyplot[nMPC],xptplot[nMPC],yptplot[nMPC];
+				double startxplot[nMPC],startyplot[nMPC];
+				std::vector<double> xptplot(nMPC), yptplot(nMPC);
 				std::vector<double> wl = {0.0, 0.0};
 				std::vector<double> wr = {0.0, 0.0};
 				std::vector<double> wc = {0.0, 0.0};
@@ -2906,6 +3242,9 @@ class GapBarrier
 				// FILE *file1 = fopen("/home/gjsk/catkin_ws/bezier.txt", "a");
 				// fprintf(file1,"*******************\n");
 				// fclose(file1);
+
+				// Publish the initial path guesses for the external vehicle
+				ext_path_publisher(xptplot, yptplot);
 				
 
 				//PERFORM THE MPC NON-LINEAR OPTIMIZATION
@@ -3068,201 +3407,309 @@ class GapBarrier
 				
 				vel_adapt=velocity_MPC;
 
+				// TODO find number of vehicles to optimize
+				// Check if there is another car in experiment, or another vehicle in simulation, and the other vehicle already generated an initial guess of a path
+				if((!car_detects.empty() || num_vehicles > 1) && !ext_path.xptplot.empty()){
 
-
-
-
-				// Find number of vehicles to optimize
-				int num_vehicles = 2; // (just two for now, can depend on vehicle detections)
-
-
-
-				//TODO 
-				// Get the subsample of obstacles from external vehicle (Most recent publish from that vehicle for now)
-				// Stored in ext_sub_obs
-
-				
-				// Begin second optimization
-				int num_opt_vars = num_vehicles * (bez_ctrl_pts*2-5);
-				opt = nlopt_create(NLOPT_LD_SLSQP, num_opt_vars); // algorithm and dimensionality
-				//[0] -> x2
-				//[1] -> x3
-				//[2] -> y3
-				//[3] -> x4
-				//[4] -> y4
-
-				for (int i=0;i<num_opt_vars;i++){
-					nlopt_set_lower_bound(opt, i, -max_lidar_range); //Bounds on max and min control point coordinates
-					nlopt_set_upper_bound(opt, i, max_lidar_range);
-				}
-
-				bez_x1=std::max(vel_adapt,min_speed)/4*bez_t_end; //Set the fixed point values here
-				bez_y2=4.0/3.0*pow(bez_x1,2)*tan(last_delta)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
-
-				double bez_x1_v2=std::max(vel_adapt_v2,min_speed)/4*bez_t_end; //Set the fixed point values here
-				double bez_y2_v2=4.0/3.0*pow(bez_x1_v2,2)*tan(last_delta_v2)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
-
-				opt_params1.clear();
-				opt_params2.clear();
-				num_param_pairs_1 = 5;
-				num_param_pairs_2 = 10;
-
-				opt_params1.push_back(num_obs+num_param_pairs_1); 	opt_params1.push_back(bez_ctrl_pts); 
-				opt_params1.push_back(bez_curv_pts); 				opt_params1.push_back(bez_alpha); 
-				opt_params1.push_back(bez_x1); 						opt_params1.push_back(bez_y2);
-				opt_params1.push_back(bez_x1_v2); 					opt_params1.push_back(bez_y2_v2);
-				opt_params1.push_back(pot_field_factor_F_QBMPC); 	opt_params1.push_back(velocity_factor_F_QBMPC); 
-
-				opt_params2.push_back(num_obs+num_param_pairs_2); opt_params2.push_back(bez_ctrl_pts); 
-				opt_params2.push_back(bez_curv_pts); 		opt_params2.push_back(bez_beta); 
-				opt_params2.push_back(bez_x1); 				opt_params2.push_back(bez_y2);
-				opt_params2.push_back(bez_x1_v2); 			opt_params2.push_back(bez_y2_v2);
-				opt_params2.push_back(max_speed); 			opt_params2.push_back(min_speed); 
-				opt_params2.push_back(max_accel); 			opt_params2.push_back(max_steering_angle); 
-				opt_params2.push_back(max_servo_speed); 	opt_params2.push_back(bez_t_end); 
-				opt_params2.push_back(wheelbase); 			opt_params2.push_back(bez_min_dist); 
-				opt_params2.push_back(theta_band_smooth); 	opt_params2.push_back(theta_band_diff);
-				opt_params2.push_back(vel_beta); 			opt_params2.push_back(stop_dist_decay);
-
-				for (int i=0; i<num_obs;i++){ //Add all subsampled obstacles to the parameters
-					opt_params1.push_back(sub_bez_obs[i][0]);
-					opt_params1.push_back(sub_bez_obs[i][1]);
-					opt_params2.push_back(sub_bez_obs[i][0]);
-					opt_params2.push_back(sub_bez_obs[i][1]);
-					// TODO 
-					// Add obstacles from external vehicle
-					
-				}
-
-				nlopt_set_min_objective(opt, myfunc_mult, opt_params1.data());
-				// double tol[num_cons*bez_curv_pts]={1e-8};
-				
-				nlopt_add_inequality_mconstraint(opt, num_cons*bez_curv_pts, bezier_inequality_con_mult, opt_params2.data(), tol);
-			
-				nlopt_set_xtol_rel(opt, 0.001); //Termination parameters
-				nlopt_set_xtol_abs1(opt, 0.001);
-				nlopt_set_maxtime(opt, 0.05);
-				
-				double xnew[num_opt_vars];
-				xnew[0]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
-				xnew[1]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]),max_lidar_range-1e-6); //x3
-				xnew[2]=std::min(std::max(-max_lidar_range+1e-6,yptplot[0]),max_lidar_range-1e-6); //y3
-				xnew[3]=std::min(std::max(-max_lidar_range+1e-6,xptplot[1]),max_lidar_range-1e-6); //x4
-				xnew[4]=std::min(std::max(-max_lidar_range+1e-6,yptplot[1]),max_lidar_range-1e-6); //y4
-
-				// TODO
-				// xptplot and yptplot should come from the path data of the external vehicle
-				// Second vehicle initial guess
-				xnew[5]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
-				xnew[6]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]),max_lidar_range-1e-6); //x3
-				xnew[7]=std::min(std::max(-max_lidar_range+1e-6,yptplot[0]),max_lidar_range-1e-6); //y3
-				xnew[8]=std::min(std::max(-max_lidar_range+1e-6,xptplot[1]),max_lidar_range-1e-6); //x4
-				xnew[9]=std::min(std::max(-max_lidar_range+1e-6,yptplot[1]),max_lidar_range-1e-6); //y4
-
-
-				successful_opt=0;
-
-				minf; // The minimum objective value, upon return
-				ott1 = ros::Time::now();
-				opt_time1 = ott1.toSec();
-				optim= nlopt_optimize(opt, x, &minf); //This runs the optimization
-				ott2 = ros::Time::now();
-				opt_time2 = ott2.toSec();
-				printf("OptTime: %lf, Evals: %d\n",opt_time2-opt_time1,nlopt_get_numevals(opt));
-
-				bez_x2=0;
-				bez_x3=0;
-				bez_y3=0;
-				bez_x4=0;
-				bez_y4=0;
-
-				double bez_x2_v2=0;
-				double bez_x3_v2=0;
-				double bez_y3_v2=0;
-				double bez_x4_v2=0;
-				double bez_y4_v2=0;
-
-				if(isnan(minf)){
-					forcestop=1;
-				}
-				else{
-					forcestop=0;
-				}
-
-				if (optim < 0) {
-					//safe_distance_adapt=safe_distance_adapt/2;
-					ROS_ERROR("Optimization Error, %d, %lf, %lf, %lf, %lf, %lf\n",optim,x[0],x[1],x[2],x[3],x[4], x[5],x[6],x[7],x[8],x[9]);
-					// forcestop = 1;
-					// printf("NLOPT Error: %s\n", nlopt_get_errmsg(optim));
-					printf("NLOPT Error: %s\n", nlopt_result_to_string(optim));
-				}
-				else {
-					successful_opt=1;
-					// forcestop = 0;
-					printf("Successful Opt: %s\n", nlopt_result_to_string(optim));
-					safe_distance_adapt=safe_distance;
-					//Save the control points here
-					bez_x2=xnew[0];
-					bez_x3=xnew[1];
-					bez_y3=xnew[2];
-					bez_x4=xnew[3];
-					bez_y4=xnew[4];
-
-					bez_x2_v2=xnew[5];
-					bez_x3_v2=xnew[6];
-					bez_y3_v2=xnew[7];
-					bez_x4_v2=xnew[8];
-					bez_y4_v2=xnew[9];
-
-					// FILE *file1wq = fopen("/home/gjsk/catkin_ws/Sim_Data/opt_time_QBMPC_fast.txt", "a");
-					// fprintf(file1wq,"%lf\n",opt_time2-opt_time1);
-					// fclose(file1wq);
-					// FILE *file1wr = fopen("/home/gjsk/catkin_ws/Sim_Data/states_QBMPC_fast.txt", "a");
-					// fprintf(file1wr,"%lf,%lf,%lf,%lf,%lf\n",opt_time2,locx,locy,last_delta,vel_adapt);
-					// fclose(file1wr);
-					//printf("%lf, %lf\n",last_delta,vel_adapt);
+					//TODO 
+					// Get the subsample of obstacles from external vehicle (Most recent publish from that vehicle for now)
+					// Stored in ext_sub_obs
 
 					
-					double t= std::max(default_dt,dt)/bez_t_end;
-					double x_dot=4*bez_x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*xnew[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
-					double x_ddot=4*bez_x1*(-12*pow(t,2)+18*t-6)+6*x[0]*(12*pow(t,2)-12*t+2)+4*xnew[1]*(-12*pow(t,2)+6*t)+12*x[3]*pow(t,2);
-					double x_dddot=4*bez_x1*(-24*t+18)+6*x[0]*(24*t-12)+4*xnew[1]*(-24*t+6)+24*xnew[3]*t;
+					// Begin second optimization
+					int num_opt_vars = num_vehicles * (bez_ctrl_pts*2-5);
+					opt = nlopt_create(NLOPT_LD_SLSQP, num_opt_vars); // algorithm and dimensionality
+					//[0] -> x2
+					//[1] -> x3
+					//[2] -> y3
+					//[3] -> x4
+					//[4] -> y4
 
-					double y_dot=6*bez_y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*xnew[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
-					double y_ddot=6*bez_y2*(12*pow(t,2)-12*t+2)+4*xnew[2]*(-12*pow(t,2)+6*t)+12*x[4]*pow(t,2);
-					double y_dddot=6*bez_y2*(24*t-12)+4*xnew[2]*(-24*t+6)+24*xnew[4]*t;
+					// Set Bounds on max and min control point coordinates
+					for (int i=0;i<num_opt_vars;i++){
+						nlopt_set_lower_bound(opt, i, -max_lidar_range); 
+						nlopt_set_upper_bound(opt, i, max_lidar_range);
+					}
 
-					double curv=(x_dot*y_ddot-y_dot*x_ddot)/(pow(pow(x_dot,2)+pow(y_dot,2),1.5));
-					double curv_dot=((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))/pow((pow(x_dot,2)+pow(y_dot,2)),2.5);
+					// Get the fixed point values for both vehicles
+					bez_x1 = 		   std::max(vel_adapt,min_speed)/4*bez_t_end; //Set the fixed point values here
+					bez_y2 = 		   4.0/3.0*pow(bez_x1,2)*tan(last_delta)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
+					double bez_x1_v2 = std::max(vel_adapt_v2,min_speed)/4*bez_t_end; //Set the fixed point values here
+					double bez_y2_v2 = 4.0/3.0*pow(bez_x1_v2,2)*tan(last_delta_v2)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
 
-					last_delta=atan2(curv*wheelbase,1);
-					last_delta=std::max(-max_steering_angle,last_delta);
-					last_delta=std::min(max_steering_angle,last_delta);
-					vel_adapt=std::min(pow(pow(x_dot,2)+pow(y_dot,2),0.5)/bez_t_end,max_speed);
+					// Get the external vehicle's relative position and orientation
+					double ext_x, ext_y, ext_theta;
+					if(ext_tf_relative_valid){
+						ext_x=ext_rel_x; ext_y=ext_rel_y; ext_theta=ext_rel_theta;
+					}
+					else if(!car_detects.empty() && car_detects[0].init==2){
+						ext_x=car_detects[0].state[0];
+						ext_y=car_detects[0].state[1];
+						ext_theta=car_detects[0].state[2]; // TODO Get this from IMU instead of yolo guess
+					}
 
-					// Second Vehicle
-					double x_dot_v2=4*bez_x1_v2*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*xnew[5]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*xnew[6]*(-4*pow(t,3)+3*pow(t,2))+4*xnew[8]*pow(t,3);
-					double x_ddot_v2=4*bez_x1_v2*(-12*pow(t,2)+18*t-6)+6*xnew[5]*(12*pow(t,2)-12*t+2)+4*xnew[6]*(-12*pow(t,2)+6*t)+12*xnew[8]*pow(t,2);
-					double x_dddot_v2=4*bez_x1_v2*(-24*t+18)+6*xnew[5]*(24*t-12)+4*xnew[6]*(-24*t+6)+24*xnew[8]*t;
+					// Get initial guesses for both vehicles
+					double xnew[num_opt_vars];
+					xnew[0]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
+					xnew[1]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]),max_lidar_range-1e-6); //x3
+					xnew[2]=std::min(std::max(-max_lidar_range+1e-6,yptplot[0]),max_lidar_range-1e-6); //y3
+					xnew[3]=std::min(std::max(-max_lidar_range+1e-6,xptplot[1]),max_lidar_range-1e-6); //x4
+					xnew[4]=std::min(std::max(-max_lidar_range+1e-6,yptplot[1]),max_lidar_range-1e-6); //y4
 
-					double y_dot_v2=6*bez_y2_v2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*xnew[7]*(-4*pow(t,3)+3*pow(t,2))+4*xnew[9]*pow(t,3);
-					double y_ddot_v2=6*bez_y2_v2*(12*pow(t,2)-12*t+2)+4*xnew[7]*(-12*pow(t,2)+6*t)+12*xnew[9]*pow(t,2);
-					double y_dddot_v2=6*bez_y2_v2*(24*t-12)+4*xnew[7]*(-24*t+6)+24*xnew[9]*t;
+					// Second vehicle initial guess
+					xnew[5]=std::min(std::max(-max_lidar_range+1e-6,ext_path.xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
+					xnew[6]=std::min(std::max(-max_lidar_range+1e-6,ext_path.xptplot[0]),max_lidar_range-1e-6); //x3
+					xnew[7]=std::min(std::max(-max_lidar_range+1e-6,ext_path.yptplot[0]),max_lidar_range-1e-6); //y3
+					xnew[8]=std::min(std::max(-max_lidar_range+1e-6,ext_path.xptplot[1]),max_lidar_range-1e-6); //x4
+					xnew[9]=std::min(std::max(-max_lidar_range+1e-6,ext_path.yptplot[1]),max_lidar_range-1e-6); //y4
+					
+					// Transform them to the ego vehicles frame
+					std::vector<std::vector<double>> transf_x;
+					transf_x.push_back({xnew[5], bez_y2_v2}); 	// x2, y2
+					transf_x.push_back({xnew[6], xnew[7]});		// x3, y3
+					transf_x.push_back({xnew[8], xnew[9]});		// x4, y4
+					transf_x = transform_points_to_ego_frame(transf_x, ext_x, ext_y, ext_theta);
+					// Store them in xnew again
+					xnew[5]=transf_x[0][0];
+					xnew[6]=transf_x[1][0];
+					xnew[7]=transf_x[1][1];
+					xnew[8]=transf_x[2][0];
+					xnew[9]=transf_x[2][1];
 
-					double curv_v2=(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2)/(pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),1.5));
-					double curv_dot_v2=((x_dot_v2*y_dddot_v2-y_dot_v2*x_dddot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-3*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2))/pow((pow(x_dot_v2,2)+pow(y_dot_v2,2)),2.5);
-
-					last_delta_v2=atan2(curv_v2*wheelbase,1);
-					last_delta_v2=std::max(-max_steering_angle,last_delta_v2);
-					last_delta_v2=std::min(max_steering_angle,last_delta_v2);
-					vel_adapt_v2=std::min(pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),0.5)/bez_t_end,max_speed);
 
 
-				}
-				startcheck=1;
+					// Transform (x1,y1) to the ego frame since x1 and y1 are fixed
+					std::vector<std::vector<double>> x1y1;
+					x1y1.push_back({bez_x1_v2, 0});
+					x1y1 = transform_points_to_ego_frame(x1y1, ext_x, ext_y, ext_theta);
+					bez_x1_v2 = x1y1[0][0];
+					double bez_y1_v2 = x1y1[0][1];
 
-				nlopt_destroy(opt);
+					// Get transformed y2 since it is fixed
+					bez_y2_v2 = transf_x[0][1];
+
+					// Fill in the optimization parameters for objectives and constraints
+					opt_params1.clear();
+					opt_params2.clear();
+					num_param_pairs_1 = 7;
+					num_param_pairs_2 = 12;
+
+					opt_params1.push_back(sub_bez_obs.size()+ext_sub_obs.size()+num_param_pairs_1); 	
+					opt_params1.push_back(bez_ctrl_pts); 
+					opt_params1.push_back(bez_curv_pts); 				opt_params1.push_back(bez_alpha); 
+					opt_params1.push_back(bez_x1); 						opt_params1.push_back(bez_y2);
+					opt_params1.push_back(ext_x); 						opt_params1.push_back(ext_y);
+					opt_params1.push_back(bez_x1_v2); 					opt_params1.push_back(bez_y2_v2);
+					opt_params1.push_back(pot_field_factor_F_QBMPC); 	opt_params1.push_back(velocity_factor_F_QBMPC); 
+					opt_params1.push_back(ext_theta);					opt_params1.push_back(bez_y1_v2);
+
+					opt_params2.push_back(sub_bez_obs.size()+ext_sub_obs.size()+num_param_pairs_2); 	
+					opt_params2.push_back(bez_ctrl_pts); 
+					opt_params2.push_back(bez_curv_pts); 				opt_params2.push_back(bez_beta); 
+					opt_params2.push_back(bez_x1); 						opt_params2.push_back(bez_y2);
+					opt_params2.push_back(ext_x); 						opt_params2.push_back(ext_y);
+					opt_params2.push_back(bez_x1_v2); 					opt_params2.push_back(bez_y2_v2);
+					opt_params2.push_back(max_speed); 					opt_params2.push_back(min_speed); 
+					opt_params2.push_back(max_accel); 					opt_params2.push_back(max_steering_angle); 
+					opt_params2.push_back(max_servo_speed); 			opt_params2.push_back(bez_t_end); 
+					opt_params2.push_back(wheelbase); 					opt_params2.push_back(bez_min_dist); 
+					opt_params2.push_back(theta_band_smooth); 			opt_params2.push_back(theta_band_diff);
+					opt_params2.push_back(vel_beta); 					opt_params2.push_back(stop_dist_decay);
+					opt_params2.push_back(ext_theta);					opt_params2.push_back(bez_y1_v2);
+
+					for (int i=0; i<num_obs;i++){ //Add all subsampled obstacles to the parameters
+						opt_params1.push_back(sub_bez_obs[i][0]);
+						opt_params1.push_back(sub_bez_obs[i][1]);
+						opt_params2.push_back(sub_bez_obs[i][0]);
+						opt_params2.push_back(sub_bez_obs[i][1]);
+					}
+
+					for (int i=0; i<ext_sub_obs.size();i++){ // Add obstacles from external vehicle
+						opt_params1.push_back(ext_sub_obs[i][0]);
+						opt_params1.push_back(ext_sub_obs[i][1]);
+						opt_params2.push_back(ext_sub_obs[i][0]);
+						opt_params2.push_back(ext_sub_obs[i][1]);
+					}
+
+
+
+					nlopt_set_min_objective(opt, myfunc_mult, opt_params1.data());
+					double tol2[num_cons_mult*bez_curv_pts]={1e-8};
+					
+					nlopt_add_inequality_mconstraint(opt, num_cons_mult*bez_curv_pts, bezier_inequality_con_mult, opt_params2.data(), tol2);
 				
+					nlopt_set_xtol_rel(opt, 0.001); //Termination parameters
+					nlopt_set_xtol_abs1(opt, 0.001);
+					nlopt_set_maxtime(opt, 0.05);
+					
+
+
+					successful_opt=0;
+
+					minf; // The minimum objective value, upon return
+					ott1 = ros::Time::now();
+					opt_time1 = ott1.toSec();
+					optim= nlopt_optimize(opt, xnew, &minf); //This runs the optimization
+					ott2 = ros::Time::now();
+					opt_time2 = ott2.toSec();
+					printf("OptTime: %lf, Evals: %d\n",opt_time2-opt_time1,nlopt_get_numevals(opt));
+
+					bez_x2=0;
+					bez_x3=0;
+					bez_y3=0;
+					bez_x4=0;
+					bez_y4=0;
+
+					double bez_x2_v2=0;
+					double bez_x3_v2=0;
+					double bez_y3_v2=0;
+					double bez_x4_v2=0;
+					double bez_y4_v2=0;
+
+					if(isnan(minf)){
+						forcestop=1;
+					}
+					else{
+						forcestop=0;
+					}
+
+					if (optim < 0) {
+						//safe_distance_adapt=safe_distance_adapt/2;
+						ROS_ERROR("Optimization Error, %d, %lf, %lf, %lf, %lf, %lf\n",optim,x[0],x[1],x[2],x[3],x[4], x[5],x[6],x[7],x[8],x[9]);
+						// forcestop = 1;
+						// printf("NLOPT Error: %s\n", nlopt_get_errmsg(optim));
+						printf("NLOPT Error: %s\n", nlopt_result_to_string(optim));
+					}
+					else {
+						successful_opt=1;
+						// forcestop = 0;
+						printf("Successful Opt: %s\n", nlopt_result_to_string(optim));
+						safe_distance_adapt=safe_distance;
+						//Save the control points here
+						bez_x2=xnew[0];
+						bez_x3=xnew[1];
+						bez_y3=xnew[2];
+						bez_x4=xnew[3];
+						bez_y4=xnew[4];
+
+						bez_x2_v2=xnew[5];
+						bez_x3_v2=xnew[6];
+						bez_y3_v2=xnew[7];
+						bez_x4_v2=xnew[8];
+						bez_y4_v2=xnew[9];
+
+
+						// FILE *file1wq = fopen("/home/gjsk/catkin_ws/Sim_Data/opt_time_QBMPC_fast.txt", "a");
+						// fprintf(file1wq,"%lf\n",opt_time2-opt_time1);
+						// fclose(file1wq);
+						// FILE *file1wr = fopen("/home/gjsk/catkin_ws/Sim_Data/states_QBMPC_fast.txt", "a");
+						// fprintf(file1wr,"%lf,%lf,%lf,%lf,%lf\n",opt_time2,locx,locy,last_delta,vel_adapt);
+						// fclose(file1wr);
+						//printf("%lf, %lf\n",last_delta,vel_adapt);
+
+						
+						double t= std::max(default_dt,dt)/bez_t_end;
+						double x_dot=4*bez_x1*(-4*pow(t,3)+9*pow(t,2)-6*t+1)+6*x[0]*(4*pow(t,3)-6*pow(t,2)+2*t)+4*xnew[1]*(-4*pow(t,3)+3*pow(t,2))+4*x[3]*pow(t,3);
+						double x_ddot=4*bez_x1*(-12*pow(t,2)+18*t-6)+6*x[0]*(12*pow(t,2)-12*t+2)+4*xnew[1]*(-12*pow(t,2)+6*t)+12*x[3]*pow(t,2);
+						double x_dddot=4*bez_x1*(-24*t+18)+6*x[0]*(24*t-12)+4*xnew[1]*(-24*t+6)+24*xnew[3]*t;
+
+						double y_dot=6*bez_y2*(4*pow(t,3)-6*pow(t,2)+2*t)+4*xnew[2]*(-4*pow(t,3)+3*pow(t,2))+4*x[4]*pow(t,3);
+						double y_ddot=6*bez_y2*(12*pow(t,2)-12*t+2)+4*xnew[2]*(-12*pow(t,2)+6*t)+12*x[4]*pow(t,2);
+						double y_dddot=6*bez_y2*(24*t-12)+4*xnew[2]*(-24*t+6)+24*xnew[4]*t;
+
+						double curv=(x_dot*y_ddot-y_dot*x_ddot)/(pow(pow(x_dot,2)+pow(y_dot,2),1.5));
+						double curv_dot=((x_dot*y_dddot-y_dot*x_dddot)*(pow(x_dot,2)+pow(y_dot,2))-3*(x_dot*x_ddot+y_dot*y_ddot)*(x_dot*y_ddot-y_dot*x_ddot))/pow((pow(x_dot,2)+pow(y_dot,2)),2.5);
+
+						last_delta=atan2(curv*wheelbase,1);
+						last_delta=std::max(-max_steering_angle,last_delta);
+						last_delta=std::min(max_steering_angle,last_delta);
+						vel_adapt=std::min(pow(pow(x_dot,2)+pow(y_dot,2),0.5)/bez_t_end,max_speed);
+
+						// Second Vehicle
+						double x_dot_v2=	4*bez_x1_v2*(-4*pow(t,3)+9*pow(t,2)-6*t+1) + 6*xnew[5]*(4*pow(t,3)-6*pow(t,2)+2*t) + 4*xnew[6]*(-4*pow(t,3)+3*pow(t,2)) + 4*xnew[8]*pow(t,3);
+						double x_ddot_v2=	4*bez_x1_v2*(-12*pow(t,2)+18*t-6) + 		 6*xnew[5]*(12*pow(t,2)-12*t+2) + 		 4*xnew[6]*(-12*pow(t,2)+6*t) + 	  12*xnew[8]*pow(t,2);
+						double x_dddot_v2=	4*bez_x1_v2*(-24*t+18) + 					 6*xnew[5]*(24*t-12) + 					 4*xnew[6]*(-24*t+6) + 				  24*xnew[8]*t;
+						// TODO Add x0, y0
+						double y_dot_v2=	6*bez_y2_v2*(4*pow(t,3)-6*pow(t,2)+2*t) + 4*xnew[7]*(-4*pow(t,3)+3*pow(t,2)) + 4*xnew[9]*pow(t,3);
+						double y_ddot_v2=	6*bez_y2_v2*(12*pow(t,2)-12*t+2) + 		  4*xnew[7]*(-12*pow(t,2)+6*t) + 	   12*xnew[9]*pow(t,2);
+						double y_dddot_v2=	6*bez_y2_v2*(24*t-12) + 				  4*xnew[7]*(-24*t+6) + 			   24*xnew[9]*t;
+
+						double curv_v2=(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2)/(pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),1.5));
+						double curv_dot_v2=((x_dot_v2*y_dddot_v2-y_dot_v2*x_dddot_v2)*(pow(x_dot_v2,2)+pow(y_dot_v2,2))-3*(x_dot_v2*x_ddot_v2+y_dot_v2*y_ddot_v2)*(x_dot_v2*y_ddot_v2-y_dot_v2*x_ddot_v2))/pow((pow(x_dot_v2,2)+pow(y_dot_v2,2)),2.5);
+
+						last_delta_v2=atan2(curv_v2*wheelbase,1);
+						last_delta_v2=std::max(-max_steering_angle,last_delta_v2);
+						last_delta_v2=std::min(max_steering_angle,last_delta_v2);
+						vel_adapt_v2=std::min(pow(pow(x_dot_v2,2)+pow(y_dot_v2,2),0.5)/bez_t_end,max_speed);
+
+
+					}
+					startcheck=1;
+
+					nlopt_destroy(opt);
+
+
+					//Publish the external vehicle obstacles
+					ext_obst_marker.header.frame_id = base_frame;
+					ext_obst_marker.header.stamp = ros::Time::now();
+					ext_obst_marker.type = visualization_msgs::Marker::POINTS;
+					ext_obst_marker.id = 0;
+					ext_obst_marker.ns = "points";
+					ext_obst_marker.action = visualization_msgs::Marker::ADD;
+					ext_obst_marker.color.a = 1.0;
+					ext_obst_marker.color.r = 1.0;
+					ext_obst_marker.color.g = 0.2;
+					ext_obst_marker.color.b = 0.1;
+					ext_obst_marker.pose.orientation.w = 1.0;
+					
+					ext_obst_marker.scale.x = 0.12;
+					ext_obst_marker.scale.y = 0.12;
+
+					ext_obst_marker.lifetime = ros::Duration(0.1);
+					ext_obst_marker.points.clear();
+
+					geometry_msgs::Point point;
+					for(const auto& obstacle : ext_sub_obs){
+						point.x = obstacle[0];
+						point.y = obstacle[1];
+						point.z = 0.0;
+						ext_obst_marker.points.push_back(point);
+					}
+		
+					ext_obst_mark.publish(ext_obst_marker);
+
+					//Publish the bezier curve for the external vehicle
+					ext_bez.header.frame_id = base_frame;
+					ext_bez.header.stamp = ros::Time::now();
+					ext_bez.type = visualization_msgs::Marker::POINTS;
+					ext_bez.id = 0; 
+					ext_bez.ns = "points";
+					ext_bez.action = visualization_msgs::Marker::ADD;
+					ext_bez.color.a = 1.0;
+					ext_bez.color.r = 0.8; 
+					ext_bez.color.g = 0.1;
+					ext_bez.color.b = 0.2;
+					ext_bez.pose.orientation.w = 1;
+
+					ext_bez.scale.x = 0.1;  // Size of points
+					ext_bez.scale.y = 0.1;
+					
+					ext_bez.lifetime = ros::Duration(0.1);
+					ext_bez.points.clear();
+					
+					// TODO
+					// Use all values from ego vehicles frame for bezier curve
+					for(int i=0; i<bez_curv_pts*10; i++){
+						double t=double(i)/double(bez_curv_pts*10-1);
+						double bez_x=pow(1-t, 4)*ext_x + 4*pow(1-t,3)*t*bez_x1_v2+6*pow(1-t,2)*pow(t,2)*bez_x2_v2+4*(1-t)*pow(t,3)*bez_x3_v2+pow(t,4)*bez_x4_v2;
+						double bez_y=pow(1-t, 4)*ext_y + 4*pow(1-t,3)*t*bez_y1_v2+6*pow(1-t,2)*pow(t,2)*bez_y2_v2+4*(1-t)*pow(t,3)*bez_y3_v2+pow(t,4)*bez_y4_v2;
+
+						point.x = bez_x; point.y = bez_y; point.z = 0;
+						ext_bez.points.push_back(point);
+					}
+
+					ext_bez_mark.publish(ext_bez);
+				}
 
 				//Publish the MPC tracking lines
 				mpc_marker.header.frame_id = base_frame;
@@ -3407,37 +3854,7 @@ class GapBarrier
 				}
 
 				bez_mark.publish(bez);
-
-
-				//Publish the external vehicle obstacles
-				ext_obst_marker.header.frame_id = base_frame;
-				ext_obst_marker.header.stamp = ros::Time::now();
-				ext_obst_marker.type = visualization_msgs::Marker::POINTS;
-				ext_obst_marker.id = 0;
-				ext_obst_marker.ns = "points";
-				ext_obst_marker.action = visualization_msgs::Marker::ADD;
-				ext_obst_marker.color.a = 1.0;
-				ext_obst_marker.color.r = 1.0;
-				ext_obst_marker.color.g = 0.2;
-				ext_obst_marker.color.b = 0.1;
-				ext_obst_marker.pose.orientation.w = 1.0;
 				
-				ext_obst_marker.scale.x = 0.12;
-				ext_obst_marker.scale.y = 0.12;
-
-				ext_obst_marker.lifetime = ros::Duration(0.1);
-				ext_obst_marker.points.clear();
-
-				geometry_msgs::Point point;
-				for(const auto& obstacle : ext_sub_obs){
-					point.x = obstacle[0];
-					point.y = obstacle[1];
-					point.z = 0.0;
-					ext_obst_marker.points.push_back(point);
-				}
-	
-				ext_obst_mark.publish(ext_obst_marker);
-
 
 			}
 
