@@ -934,13 +934,12 @@ void bezier_inequality_con_mult(unsigned m, double *result, unsigned n, const do
 			grad[(num_cons_mult*i+17)*n+8]=-grad[(num_cons_mult*i+17)*n+8]/result[num_cons_mult*i+17];
 			grad[(num_cons_mult*i+17)*n+9]=-grad[(num_cons_mult*i+17)*n+9]/result[num_cons_mult*i+17];
 		}
-		//result[num_cons_mult*i+17]=1.0/double(bez_beta)*log(result[num_cons_mult*i+17])+bez_min_dist;
+		result[num_cons_mult*i+17]=1.0/double(bez_beta)*log(result[num_cons_mult*i+17])+bez_min_dist;
 		
 		
 		// Minimum Distance between the vehicles
-		// TODO Make this only check the distance between two points at the same time
 		if(i != 0){ // Skip the first point since its the initial position of the vehicle
-			double dist2= pow(bez_curv[i][0]-bez_curv_v2[i][0],2)+pow(bez_curv[i][1]-bez_curv_v2[i][1],2); //Euclidean distance
+			double dist2= pow(bez_curv[i][0]-bez_curv_v2[i][0],2)+pow(bez_curv[i][1]-bez_curv_v2[i][1],2); //Squared distance
 			result[num_cons_mult*i+18]=pow(bez_min_dist, 2)-dist2;
 			
 			if(grad){
@@ -2699,14 +2698,19 @@ class GapBarrier
 			
 		}
 
-		void ext_path_publisher(std::vector<double> xptplot, std::vector<double> yptplot){
+		void ext_path_publisher(std::vector<double> bez_x, std::vector<double> bez_y, double velocity, double angle){
 			f1tenth_simulator::PathData path_msg;
 			path_msg.header.frame_id = base_frame;
 			path_msg.header.stamp = ros::Time::now();
-			for(int i = 0; i < xptplot.size(); i++){
-				path_msg.xptplot.push_back(xptplot[i]);
-				path_msg.yptplot.push_back(yptplot[i]);
-			}
+			// for(int i = 0; i < xptplot.size(); i++){
+			// 	path_msg.xptplot.push_back(bez_x[i]);
+			// 	path_msg.yptplot.push_back(bez_y[i]);
+			// }
+			path_msg.bez_x = bez_x;
+			path_msg.bez_y = bez_y;
+			
+			path_msg.velocity = velocity;
+			path_msg.angle = angle; 
 			path_msg.time_horizon = bez_t_end;
 			//path_msg.num_disc = xptplot.size();
 			path_msg.fixed = false;
@@ -2714,35 +2718,14 @@ class GapBarrier
 		}
 
 		void path_callback(const f1tenth_simulator::PathData & path_msg){
-			// The incoming points are in the external vehicle's frame. Convert and
-			// retain them in this vehicle's frame, preserving the path metadata.
-			// double rel_x, rel_y, rel_theta;
-			// if(ext_tf_relative_valid){
-			// 	rel_x=ext_rel_x; rel_y=ext_rel_y; rel_theta=ext_rel_theta;
-			// }
-			// else if(!car_detects.empty() && car_detects[0].init==2){
-			// 	rel_x=car_detects[0].state[0];
-			// 	rel_y=car_detects[0].state[1];
-			// 	rel_theta=car_detects[0].state[2];
-			// }
-			// else{
-			// 	ROS_WARN_THROTTLE(2.0, "External vehicle pose unavailable; cannot transform received path");
-			// 	return;
-			//}
-
+			// Store the path data of the external vehicle
 			ext_path=path_msg;
-			ext_path.header.frame_id=base_frame;
-			ext_path.header.stamp=ros::Time::now();
-			// const double c=cos(rel_theta), s=sin(rel_theta);
-			// const size_t num_points=std::min(ext_path.xptplot.size(), ext_path.yptplot.size());
-			// for(size_t i=0; i<num_points; ++i){
-			// 	const double x=path_msg.xptplot[i], y=path_msg.yptplot[i];
-			// 	ext_path.xptplot[i]=rel_x+c*x-s*y;
-			// 	ext_path.yptplot[i]=rel_y+s*x+c*y;
-			// }
-			// Transform these values when performing optimizaiton
-			ext_path.xptplot = path_msg.xptplot;
-			ext_path.yptplot = path_msg.yptplot;
+			// Throw the data out if it's too old
+			if (ros::Time::now() - ext_path.header.stamp > ros::Duration(0.5)) {
+				ROS_WARN_THROTTLE(2.0, "Received path is older than 0.5 seconds; ignoring");
+				ext_path = f1tenth_simulator::PathData();  // Reset to empty path
+				return;
+			}
 		}
 
 		void subsampled_obstacle_publisher(std::vector<std::vector<double>> sub_obstacles){
@@ -3257,7 +3240,11 @@ class GapBarrier
 				// fclose(file1);
 
 				// Publish the initial path guesses for the external vehicle
-				ext_path_publisher(xptplot, yptplot);
+				// ext_path_publisher(xptplot, yptplot);
+
+				// Save the velocity and steering angle for second optimization
+				double vel_0 = vel_adapt;
+				double delta_0 = last_delta;
 				
 
 				//PERFORM THE MPC NON-LINEAR OPTIMIZATION
@@ -3390,16 +3377,21 @@ class GapBarrier
 					last_delta=std::min(max_steering_angle,last_delta);
 					vel_adapt=std::min(pow(pow(x_dot,2)+pow(y_dot,2),0.5)/bez_t_end,max_speed);
 
+					// Publish the initial optimization results for the external vehicle
+					std::vector<double> bez_x = {bez_x1, bez_x2, bez_x3, bez_x4};
+					std::vector<double> bez_y = {0, bez_y2, bez_y3, bez_y4};
+					ext_path_publisher(bez_x, bez_y, vel_adapt, last_delta);
 				}
 				startcheck=1;
 
 				nlopt_destroy(opt);
 
-			
+				// Set the success flag for multi-vehicle optimization
+				multi_vehicle_success = 0;
 
 				// TODO find number of vehicles to optimize
 				// Check if there is another car in experiment, or another vehicle in simulation, and the other vehicle already generated an initial guess of a path
-				if((ext_tf_relative_valid || !car_detects.empty() || num_vehicles > 1) && !ext_path.xptplot.empty()){
+				if((ext_tf_relative_valid || !car_detects.empty() || num_vehicles > 1) && !ext_path.bez_x.empty() && !ext_sub_obs.empty()){
 
 					//TODO 
 					// Get the subsample of obstacles from external vehicle (Most recent publish from that vehicle for now)
@@ -3422,10 +3414,15 @@ class GapBarrier
 					}
 
 					// Get the fixed point values for both vehicles
-					bez_x1 = 		   std::max(vel_adapt,min_speed)/4*bez_t_end; //Set the fixed point values here
-					bez_y2 = 		   4.0/3.0*pow(bez_x1,2)*tan(last_delta)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
-					double bez_x1_v2 = std::max(vel_adapt_v2,min_speed)/4*bez_t_end; //Set the fixed point values here
-					double bez_y2_v2 = 4.0/3.0*pow(bez_x1_v2,2)*tan(last_delta_v2)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
+					// bez_x1 = 		   std::max(vel_0,min_speed)/4*bez_t_end; //Set the fixed point values here
+					// bez_y2 = 		   4.0/3.0*pow(bez_x1,2)*tan(delta_0)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
+					// double bez_x1_v2 = std::max(vel_adapt_v2,min_speed)/4*bez_t_end; //Set the fixed point values here
+					// double bez_y2_v2 = 4.0/3.0*pow(bez_x1_v2,2)*tan(last_delta_v2)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
+
+					bez_x1 = std::max(vel_0,min_speed)/4*bez_t_end; //Set the fixed point values here
+					bez_y2 = 4.0/3.0*pow(bez_x1,2)*tan(delta_0)/wheelbase; //last_delta based on optimization in sim, actual value returned by vesc in exp
+					double bez_x1_v2 = ext_path.bez_x[0];
+					double bez_y2_v2 = ext_path.bez_y[1];
 
 					// Get the external vehicle's relative position and orientation
 					double ext_x, ext_y, ext_theta;
@@ -3440,18 +3437,30 @@ class GapBarrier
 
 					// Get initial guesses for both vehicles
 					double xnew[num_opt_vars];
-					xnew[0]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
-					xnew[1]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]),max_lidar_range-1e-6); //x3
-					xnew[2]=std::min(std::max(-max_lidar_range+1e-6,yptplot[0]),max_lidar_range-1e-6); //y3
-					xnew[3]=std::min(std::max(-max_lidar_range+1e-6,xptplot[1]),max_lidar_range-1e-6); //x4
-					xnew[4]=std::min(std::max(-max_lidar_range+1e-6,yptplot[1]),max_lidar_range-1e-6); //y4
+					// xnew[0]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
+					// xnew[1]=std::min(std::max(-max_lidar_range+1e-6,xptplot[0]),max_lidar_range-1e-6); //x3
+					// xnew[2]=std::min(std::max(-max_lidar_range+1e-6,yptplot[0]),max_lidar_range-1e-6); //y3
+					// xnew[3]=std::min(std::max(-max_lidar_range+1e-6,xptplot[1]),max_lidar_range-1e-6); //x4
+					// xnew[4]=std::min(std::max(-max_lidar_range+1e-6,yptplot[1]),max_lidar_range-1e-6); //y4
 
-					// Second vehicle initial guess
-					xnew[5]=std::min(std::max(-max_lidar_range+1e-6,ext_path.xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
-					xnew[6]=std::min(std::max(-max_lidar_range+1e-6,ext_path.xptplot[0]),max_lidar_range-1e-6); //x3
-					xnew[7]=std::min(std::max(-max_lidar_range+1e-6,ext_path.yptplot[0]),max_lidar_range-1e-6); //y3
-					xnew[8]=std::min(std::max(-max_lidar_range+1e-6,ext_path.xptplot[1]),max_lidar_range-1e-6); //x4
-					xnew[9]=std::min(std::max(-max_lidar_range+1e-6,ext_path.yptplot[1]),max_lidar_range-1e-6); //y4
+					// // Second vehicle initial guess
+					// xnew[5]=std::min(std::max(-max_lidar_range+1e-6,ext_path.xptplot[0]*2.0/3.0),max_lidar_range-1e-6); //x2
+					// xnew[6]=std::min(std::max(-max_lidar_range+1e-6,ext_path.xptplot[0]),max_lidar_range-1e-6); //x3
+					// xnew[7]=std::min(std::max(-max_lidar_range+1e-6,ext_path.yptplot[0]),max_lidar_range-1e-6); //y3
+					// xnew[8]=std::min(std::max(-max_lidar_range+1e-6,ext_path.xptplot[1]),max_lidar_range-1e-6); //x4
+					// xnew[9]=std::min(std::max(-max_lidar_range+1e-6,ext_path.yptplot[1]),max_lidar_range-1e-6); //y4
+
+					// Use the prior optimization as the starting point for the multi-vehicle optimization
+					xnew[0] = x[0]; 
+					xnew[1] = x[1];
+					xnew[2] = x[2];
+					xnew[3] = x[3];
+					xnew[4] = x[4];
+					xnew[5] = ext_path.bez_x[1];
+					xnew[6] = ext_path.bez_x[2];
+					xnew[7] = ext_path.bez_y[2];
+					xnew[8] = ext_path.bez_x[3];
+					xnew[9] = ext_path.bez_y[3];
 					
 					// Transform them to the ego vehicles frame
 					std::vector<std::vector<double>> transf_x;
@@ -3459,13 +3468,11 @@ class GapBarrier
 					transf_x.push_back({xnew[6], xnew[7]});		// x3, y3
 					transf_x.push_back({xnew[8], xnew[9]});		// x4, y4
 					transf_x = transform_points_to_ego_frame(transf_x, ext_x, ext_y, ext_theta);
-					// Store them in xnew again
 					xnew[5]=transf_x[0][0];
 					xnew[6]=transf_x[1][0];
 					xnew[7]=transf_x[1][1];
 					xnew[8]=transf_x[2][0];
 					xnew[9]=transf_x[2][1];
-
 
 
 					// Transform (x1,y1) to the ego frame since x1 and y1 are fixed
@@ -3538,7 +3545,6 @@ class GapBarrier
 
 
 					successful_opt=0;
-					multi_vehicle_success = 0;
 
 					minf; // The minimum objective value, upon return
 					ott1 = ros::Time::now();
@@ -3569,14 +3575,14 @@ class GapBarrier
 
 					if (optim < 0 && optim != -4) {
 						//safe_distance_adapt=safe_distance_adapt/2;
-						ROS_ERROR("Optimization Error, %d, %lf, %lf, %lf, %lf, %lf\n",optim,xnew[0],xnew[1],xnew[2],xnew[3],xnew[4], xnew[5],xnew[6],xnew[7],xnew[8],xnew[9]);
+						ROS_ERROR("Optimization Error, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n",optim,xnew[0],xnew[1],xnew[2],xnew[3],xnew[4], xnew[5],xnew[6],xnew[7],xnew[8],xnew[9]);
 						// forcestop = 1;
 						// printf("NLOPT Error: %s\n", nlopt_get_errmsg(optim));
 						printf("NLOPT Error: %s\n", nlopt_result_to_string(optim));
 					}
 					else {
 						if (optim == -4){	// Roundoff error, still gives a useful result typically
-							ROS_ERROR("Optimization Error, %d, %lf, %lf, %lf, %lf, %lf\n",optim,xnew[0],xnew[1],xnew[2],xnew[3],xnew[4], xnew[5],xnew[6],xnew[7],xnew[8],xnew[9]);
+							ROS_ERROR("Optimization Error, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n",optim,xnew[0],xnew[1],xnew[2],xnew[3],xnew[4], xnew[5],xnew[6],xnew[7],xnew[8],xnew[9]);
 							printf("NLOPT Error: %s\n", nlopt_result_to_string(optim));
 						}
 						successful_opt=1;
@@ -3643,7 +3649,12 @@ class GapBarrier
 						multi_vehicle_success = 1;
 
 					}
+					// Reset data read from external vehicle
+					ext_path = f1tenth_simulator::PathData();  
+					ext_sub_obs.clear();
+
 					startcheck=1;
+
 
 					nlopt_destroy(opt);
 
@@ -3902,10 +3913,18 @@ class GapBarrier
 
 					// TODO
 					// Send drive command for second vehicle (for now)
-					if(multi_vehicle_success==1){
+					if(multi_vehicle_success==1){	// Set velocity and steering if multi-vehicle opt succeeded
 						drive_msg_v2.drive.steering_angle = last_delta_v2;
 						drive_msg_v2.drive.speed = 	vel_adapt_v2;
 						printf("V2 Steering Angle: %lf, V2 Velocity: %lf\n",last_delta_v2,vel_adapt_v2);
+					}
+					else if(!ext_path.bez_x.empty()){ // Use the original opt commands if the second one fails
+						drive_msg_v2.drive.steering_angle = ext_path.angle;
+						drive_msg_v2.drive.speed = 	ext_path.velocity;
+					}
+					else{	// Stop the vehicle if both fail
+						drive_msg_v2.drive.steering_angle = 0;
+						drive_msg_v2.drive.speed = 	0;
 					}
 					printf("*******************\n");
 				}
