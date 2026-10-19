@@ -168,7 +168,7 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 
 	//Create the discretized Bezier Curve
 	for(int i=0; i<bez_curv_pts; i++){
-		double t=double(i)/double(bez_curv_pts-1);
+		double t=double(i)/double(bez_curv_pts);
 		double bez_x=4*pow(1-t,3)*t*x1+6*pow(1-t,2)*pow(t,2)*x[0]+4*(1-t)*pow(t,3)*x[1]+pow(t,4)*x[3];
 		double bez_y=6*pow(1-t,2)*pow(t,2)*y2+4*(1-t)*pow(t,3)*x[2]+pow(t,4)*x[4]; //y1=0
 		bez_curv.push_back({bez_x,bez_y});
@@ -182,7 +182,7 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 	}
 
 	for(int i=0;i<bez_curv_pts;i++){
-		double t=double(i)/double(bez_curv_pts-1);
+		double t=double(i)/double(bez_curv_pts);
 		double px2=6*pow(1-t,2)*pow(t,2);
 		double px3=4*(1-t)*pow(t,3);
 		double py3=px3;
@@ -252,6 +252,7 @@ double myfunc_mult(unsigned n, const double *x, double *grad, void *my_func_data
 	double y1_v2=xopt[1][6];
 	int num_ext_obst=xopt[0][7];
 	int num_param_pairs=xopt[1][7];
+	double path_sep_factor=xopt[0][8];
 	std::vector<std::vector<double>> bez_curv;
 	std::vector<std::vector<double>> bez_curv2;
 	//Optimization variables:
@@ -268,7 +269,7 @@ double myfunc_mult(unsigned n, const double *x, double *grad, void *my_func_data
 
 	//Create the discretized Bezier Curve for Vehicle 1
 	for(int i=0; i<bez_curv_pts; i++){
-		double t=double(i)/double(bez_curv_pts-1);
+		double t=double(i)/double(bez_curv_pts);
 		double bez_x=4*pow(1-t,3)*t*x1+6*pow(1-t,2)*pow(t,2)*x[0]+4*(1-t)*pow(t,3)*x[1]+pow(t,4)*x[3];
 		double bez_y=6*pow(1-t,2)*pow(t,2)*y2+4*(1-t)*pow(t,3)*x[2]+pow(t,4)*x[4]; //y1=0
 		bez_curv.push_back({bez_x,bez_y});
@@ -276,7 +277,7 @@ double myfunc_mult(unsigned n, const double *x, double *grad, void *my_func_data
 
 	// Create the discretized Bezier Curve for Vehicle 2
 	for(int i=0; i<bez_curv_pts; i++){
-		double t=double(i)/double(bez_curv_pts-1);
+		double t=double(i)/double(bez_curv_pts);
 		double bez_x= pow(1-t, 4)*x0_v2 + 4*pow(1-t,3)*t*x1_v2+6*pow(1-t,2)*pow(t,2)*x[5]  +4*(1-t)*pow(t,3)*x[6] + pow(t,4)*x[8];
 		double bez_y= pow(1-t, 4)*y0_v2 + 4*pow(1-t,3)*t*y1_v2+6*pow(1-t,2)*pow(t,2)*y2_v2 +4*(1-t)*pow(t,3)*x[7] + pow(t,4)*x[9];
 		bez_curv2.push_back({bez_x,bez_y});
@@ -290,7 +291,7 @@ double myfunc_mult(unsigned n, const double *x, double *grad, void *my_func_data
 	}
 
 	for(int i=0;i<bez_curv_pts;i++){
-		double t=double(i)/double(bez_curv_pts-1);
+		double t=double(i)/double(bez_curv_pts);
 		double px2=6*pow(1-t,2)*pow(t,2);
 		double px3=4*(1-t)*pow(t,3);
 		double py3=px3;
@@ -355,9 +356,10 @@ double myfunc_mult(unsigned n, const double *x, double *grad, void *my_func_data
 		}
 
 		// Additional obstacle avoidance term for the second vehicle's Bezier curve against the first vehicle's Bezier curve
-		// Each point of both bezier curves should stay far from each point of the other bezier curve
-		for(int j=0;j<bez_curv_pts;j++){
-			double t_v2=double(j)/double(bez_curv_pts-1);
+		// Each point of both bezier curves should stay far from each point of the other bezier curve that's nearby temporally
+		//for(int j=0;j<bez_curv_pts;j++){
+		for(int j=std::max(0,i-1); j<=std::min(bez_curv_pts-1,i+1); j++){	// Compare +/-1 time step away
+			double t_v2=double(j)/double(bez_curv_pts);
 			double px2_v2=6*pow(1-t_v2,2)*pow(t_v2,2);
 			double px3_v2=4*(1-t_v2)*pow(t_v2,3);
 			double py3_v2=px3_v2;
@@ -365,19 +367,19 @@ double myfunc_mult(unsigned n, const double *x, double *grad, void *my_func_data
 			double py4_v2=px4_v2;
 			double dist2= pow(bez_curv[i][0]-bez_curv2[j][0],2)+pow(bez_curv[i][1]-bez_curv2[j][1],2); //Squared distance
 			
-			funcreturn=funcreturn+(potfield_factor/dist2)*exp(-bez_alpha*dist2); //Sum of reciprocal squared distances, exponentially decaying weight
+			funcreturn=funcreturn+(path_sep_factor/dist2)*exp(-bez_alpha*dist2); //Sum of reciprocal squared distances, exponentially decaying weight
 			//Next, find grad for each of five variables
 			if(grad){
-	/* x2 */ 	grad[0]=grad[0]-potfield_factor *2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px2;
-	/* x3 */ 	grad[1]=grad[1]-potfield_factor *2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px3;
-	/* y3 */ 	grad[2]=grad[2]-potfield_factor *2*(bez_curv[i][1]-bez_curv2[j][1])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py3;
-	/* x4 */ 	grad[3]=grad[3]-potfield_factor *2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px4;
-	/* y4 */ 	grad[4]=grad[4]-potfield_factor *2*(bez_curv[i][1]-bez_curv2[j][1])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py4;
-	/* x2_v2 */ grad[5]=grad[5]-potfield_factor*-2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px2_v2;
-	/* x3_v2 */ grad[6]=grad[6]-potfield_factor*-2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px3_v2;
-	/* y3_v2 */ grad[7]=grad[7]-potfield_factor*-2*(bez_curv[i][1]-bez_curv2[j][1])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py3_v2;
-	/* x4_v2 */ grad[8]=grad[8]-potfield_factor*-2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px4_v2;
-	/* y4_v2 */ grad[9]=grad[9]-potfield_factor*-2*(bez_curv[i][1]-bez_curv2[j][1])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py4_v2;
+	/* x2 */ 	grad[0]=grad[0]-path_sep_factor *2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px2;
+	/* x3 */ 	grad[1]=grad[1]-path_sep_factor *2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px3;
+	/* y3 */ 	grad[2]=grad[2]-path_sep_factor *2*(bez_curv[i][1]-bez_curv2[j][1])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py3;
+	/* x4 */ 	grad[3]=grad[3]-path_sep_factor *2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px4;
+	/* y4 */ 	grad[4]=grad[4]-path_sep_factor *2*(bez_curv[i][1]-bez_curv2[j][1])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py4;
+	/* x2_v2 */ grad[5]=grad[5]-path_sep_factor*-2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px2_v2;
+	/* x3_v2 */ grad[6]=grad[6]-path_sep_factor*-2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px3_v2;
+	/* y3_v2 */ grad[7]=grad[7]-path_sep_factor*-2*(bez_curv[i][1]-bez_curv2[j][1])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py3_v2;
+	/* x4_v2 */ grad[8]=grad[8]-path_sep_factor*-2*(bez_curv[i][0]-bez_curv2[j][0])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*px4_v2;
+	/* y4_v2 */ grad[9]=grad[9]-path_sep_factor*-2*(bez_curv[i][1]-bez_curv2[j][1])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py4_v2;
 			}
 		}
 		
@@ -836,7 +838,8 @@ void bezier_inequality_con_mult(unsigned m, double *result, unsigned n, const do
 
 		// Constraints for vehicle 2
 		//Max and min velocity
-		result[num_cons_mult*i+9] =pow(x_dot_v2,2)+pow(y_dot_v2,2)-pow(max_v,2)*pow(t_end,2);
+		double max_v_v2 = 1.8;
+		result[num_cons_mult*i+9] =pow(x_dot_v2,2)+pow(y_dot_v2,2)-pow(max_v_v2,2)*pow(t_end,2);
 		result[num_cons_mult*i+10]= -pow(x_dot_v2,2)-pow(y_dot_v2,2)+pow(min_v,2)*pow(t_end,2);
 
 		if(grad){
@@ -1132,6 +1135,7 @@ class GapBarrier
 		double stop_dist_decay=0;
 		double pot_field_factor_F_QBMPC=0;
 		double velocity_factor_F_QBMPC=0;
+		double path_sep_factor_C_QBMPC=0;
 		float disp_ext_factor;
 		float veh_width;
 
@@ -1160,6 +1164,8 @@ class GapBarrier
         double cv_distance_to_lidar;
         double num_cv_sample_rows;
         double num_cv_sample_cols;
+		double horiz_fov;
+        double vert_fov;
 
         double cv_ground_angle;
         double cv_lidar_range_max_diff;
@@ -1318,6 +1324,7 @@ class GapBarrier
 			nf.getParam("stop_dist_decay", stop_dist_decay);
 			nf.getParam("pot_field_factor_F_QBMPC", pot_field_factor_F_QBMPC);
 			nf.getParam("velocity_factor_F_QBMPC", velocity_factor_F_QBMPC);
+			nf.getParam("path_sep_factor_C_QBMPC", path_sep_factor_C_QBMPC);
 			nf.getParam("disp_ext_factor", disp_ext_factor);
 			nf.getParam("width", veh_width);
 
@@ -1335,6 +1342,8 @@ class GapBarrier
             ros::param::get("~cv_distance_to_lidar", cv_distance_to_lidar);
             ros::param::get("~num_cv_sample_rows", num_cv_sample_rows);
             ros::param::get("~num_cv_sample_cols",num_cv_sample_cols);
+			ros::param::get("~horiz_fov",horiz_fov);
+			ros::param::get("~vert_fov",vert_fov);
 
             ros::param::get("~cv_ground_angle", cv_ground_angle);
             ros::param::get("~cv_lidar_range_max_diff",cv_lidar_range_max_diff);
@@ -1473,26 +1482,37 @@ class GapBarrier
 					double detx=(robx-simx)*cos(simtheta)+(roby-simy)*sin(simtheta);
 					double dety=-(robx-simx)*sin(simtheta)+(roby-simy)*cos(simtheta);
 
-					tf_data new_tf;
-					new_tf.tf_x=simx; new_tf.tf_y=simy; new_tf.tf_theta=simtheta; new_tf.tf_time=ros::Time::now().toSec();
-					if(car_detects.size()<1){
-						vehicle_detection new_det;
-						new_det.bound_box={0,0,20,20}; //ymin, xmin, ymax, xmax PLACEHOLDERS
-						new_det.meas={detx,dety};
-						new_det.last_det=1;
-						new_det.meas_tf=new_tf;
-						new_det.cov_P(0,0)=0.01; new_det.cov_P(1,1)=0.01; new_det.cov_P(2,2)=std::pow(5 * M_PI / 180, 2);
-						new_det.cov_P(3,3)=2; new_det.cov_P(4,4)=std::pow(5 * M_PI / 180, 2);
-						new_det.proc_noise=new_det.cov_P;
-		
-						car_detects.push_back(new_det);
+					// Only detect for simulation if external vehicle is within depth camera FOV
+					if(atan2(dety, detx) < horiz_fov/2 && atan2(dety, detx) > -horiz_fov/2){
+						ext_rel_x=detx;
+						ext_rel_y=dety;
+						ext_rel_theta=ext_pose_theta-simtheta;
+						while(ext_rel_theta>M_PI) ext_rel_theta-=2*M_PI;
+						while(ext_rel_theta<-M_PI) ext_rel_theta+=2*M_PI;
+						ext_tf_relative_valid=true;
+
+						tf_data new_tf;
+						new_tf.tf_x=simx; new_tf.tf_y=simy; new_tf.tf_theta=simtheta; new_tf.tf_time=ros::Time::now().toSec();
+						if(car_detects.size()<1){
+							vehicle_detection new_det;
+							new_det.bound_box={0,0,20,20}; //ymin, xmin, ymax, xmax PLACEHOLDERS
+							new_det.meas={detx,dety};
+							new_det.last_det=1;
+							new_det.meas_tf=new_tf;
+							new_det.cov_P(0,0)=0.01; new_det.cov_P(1,1)=0.01; new_det.cov_P(2,2)=std::pow(5 * M_PI / 180, 2);
+							new_det.cov_P(3,3)=2; new_det.cov_P(4,4)=std::pow(5 * M_PI / 180, 2);
+							new_det.proc_noise=new_det.cov_P;
+			
+							car_detects.push_back(new_det);
+						}
+						else{
+							car_detects[0].bound_box={0,0,20,20}; //ymin, xmin, ymax, xmax PLACEHOLDERS
+							car_detects[0].meas={detx,dety};
+							car_detects[0].last_det=1; //Detected in this round
+							car_detects[0].meas_tf=new_tf;
+						}
 					}
-					else{
-						car_detects[0].bound_box={0,0,20,20}; //ymin, xmin, ymax, xmax PLACEHOLDERS
-						car_detects[0].meas={detx,dety};
-						car_detects[0].last_det=1; //Detected in this round
-						car_detects[0].meas_tf=new_tf;
-					}
+					else {ext_tf_relative_valid=false;} // 
 				}
 				else if(transform.header.frame_id == map_frame && transform.child_frame_id == base_frame){ //This is for simulation only
 					simx=transform.transform.translation.x;
@@ -1505,16 +1525,6 @@ class GapBarrier
 					simtheta = atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z));
 					sim_pose_valid=true;
 				}
-			}
-			if(have_ext_pose && sim_pose_valid){
-				// Convert the two TF poses directly to the ego frame
-				double dx=ext_pose_x-simx, dy=ext_pose_y-simy;
-				ext_rel_x=dx*cos(simtheta)+dy*sin(simtheta);
-				ext_rel_y=-dx*sin(simtheta)+dy*cos(simtheta);
-				ext_rel_theta=ext_pose_theta-simtheta;
-				while(ext_rel_theta>M_PI) ext_rel_theta-=2*M_PI;
-				while(ext_rel_theta<-M_PI) ext_rel_theta+=2*M_PI;
-				ext_tf_relative_valid=true;
 			}
 			if(updated){
 				locx=mapx+cos(maptheta)*odomx-sin(maptheta)*odomy;
@@ -1553,12 +1563,15 @@ class GapBarrier
 
 
 		void yolo_callback(const f1tenth_simulator::YoloData & yolo_msg){ //Process all other vehicle detections for the KF
+			ext_tf_relative_valid=false;
 			if(!cv_image_data_defined || !intrinsics_c_defined) return; //Check if initial data exists
 
 
 			if(yolo_msg.classes.size()==0) return; //No detections
 
 			if(depth_imgs.size()<1) return;
+
+			ext_tf_relative_valid=true; // There is an external detection
 			int depth_ind=depth_imgs.size()-1; double mindiff=100;
 			for (int i=0;i<depth_imgs.size();i++){ //Find matching depth image to the rgb, based on closest reported timestamp
 				if(mindiff>std::abs(depth_imgs[i]->header.stamp.toSec()-yolo_msg.time)){
@@ -2749,16 +2762,15 @@ class GapBarrier
 				ext_sub_obs.push_back({obstacle.x, obstacle.y}); 
 			}
 
-			// Use simulation TF when available; on hardware, use the YOLO tracker
-			// pose, which is maintained in the ego vehicle frame.
+			// Use simulation TF when available. In experiment, use the YOLO tracker
 			double rel_x, rel_y, rel_theta;
 			if(ext_tf_relative_valid){
-				rel_x=ext_rel_x; rel_y=ext_rel_y; rel_theta=ext_rel_theta;
-			}
-			else if(!car_detects.empty() && car_detects[0].init==2){
-				rel_x=car_detects[0].state[0];
-				rel_y=car_detects[0].state[1];
-				rel_theta=car_detects[0].state[2];
+				//rel_x=ext_rel_x; rel_y=ext_rel_y; rel_theta=ext_rel_theta;
+				if(!car_detects.empty() && car_detects[0].init==2){
+					rel_x=car_detects[0].state[0];
+					rel_y=car_detects[0].state[1];
+					rel_theta=car_detects[0].state[2];
+				}
 			}
 			else{
 				ROS_WARN_THROTTLE(2.0, "External vehicle pose unavailable; cannot transform received obstacles");
@@ -2992,8 +3004,6 @@ class GapBarrier
 									track_y=track_y+car_detects[i].state[3]*sin(track_theta)*dt/mult_factor;
 									track_theta=track_theta+car_detects[i].state[3]/wheelbase*tan(car_detects[i].state[4])*dt/mult_factor;
 
-									// TODO Skip the rest for now
-									break;
 								}
 
 							}
@@ -3317,7 +3327,7 @@ class GapBarrier
 				nlopt_result optim= nlopt_optimize(opt, x, &minf); //This runs the optimization
 				ros::Time ott2 = ros::Time::now();
 				double opt_time2 = ott2.toSec();
-				printf("OptTime: %lf, Evals: %d\n",opt_time2-opt_time1,nlopt_get_numevals(opt));
+				if(vehicle_prefix == "/racecar1/") printf("OptTime: %lf, Evals: %d\n",opt_time2-opt_time1,nlopt_get_numevals(opt));
 
 				double bez_x2=0;
 				double bez_x3=0;
@@ -3334,15 +3344,16 @@ class GapBarrier
 
 				if (optim < 0) {
 					//safe_distance_adapt=safe_distance_adapt/2;
-					ROS_ERROR("Optimization Error, %d, %lf, %lf, %lf, %lf, %lf\n",optim,x[0],x[1],x[2],x[3],x[4]);
-					// forcestop = 1;
-					// printf("NLOPT Error: %s\n", nlopt_get_errmsg(optim));
-					printf("NLOPT Error: %s\n", nlopt_result_to_string(optim));
+					if(vehicle_prefix == "/racecar1/") {
+						ROS_ERROR("Optimization Error, %d, %lf, %lf, %lf, %lf, %lf\n",optim,x[0],x[1],x[2],x[3],x[4]);
+						// forcestop = 1;
+						printf("NLOPT Error: %s\n", nlopt_result_to_string(optim));
+					}
 				}
 				else {
 					successful_opt=1;
 					// forcestop = 0;
-					printf("Successful Opt: %s\n", nlopt_result_to_string(optim));
+					if(vehicle_prefix == "/racecar1/") printf("Successful Opt: %s\n", nlopt_result_to_string(optim));
 					safe_distance_adapt=safe_distance;
 					//Save the control points here
 					bez_x2=x[0];
@@ -3390,8 +3401,8 @@ class GapBarrier
 				multi_vehicle_success = 0;
 
 				// TODO find number of vehicles to optimize
-				// Check if there is another car in experiment, or another vehicle in simulation, and the other vehicle already generated an initial guess of a path
-				if((ext_tf_relative_valid || !car_detects.empty() || num_vehicles > 1) && !ext_path.bez_x.empty() && !ext_sub_obs.empty()){
+				// Check if there is another car in experiment, or another vehicle in simulation, and the other vehicle sent guess of a path and lidar scan
+				if(num_vehicles > 1 && (ext_tf_relative_valid || !car_detects.empty()) && !ext_path.bez_x.empty() && !ext_sub_obs.empty()){
 
 					//TODO 
 					// Get the subsample of obstacles from external vehicle (Most recent publish from that vehicle for now)
@@ -3488,7 +3499,7 @@ class GapBarrier
 					// Fill in the optimization parameters for objectives and constraints
 					opt_params1.clear();
 					opt_params2.clear();
-					num_param_pairs_1 = 8;
+					num_param_pairs_1 = 9;
 					num_param_pairs_2 = 13;
 
 					opt_params1.push_back(sub_bez_obs.size()+ext_sub_obs.size()+num_param_pairs_1); 	
@@ -3500,6 +3511,7 @@ class GapBarrier
 					opt_params1.push_back(pot_field_factor_F_QBMPC); 	opt_params1.push_back(velocity_factor_F_QBMPC); 
 					opt_params1.push_back(ext_theta);					opt_params1.push_back(bez_y1_v2);
 					opt_params1.push_back(ext_sub_obs.size());			opt_params1.push_back(num_param_pairs_1);
+					opt_params1.push_back(path_sep_factor_C_QBMPC);		opt_params1.push_back(0.0);
 
 					opt_params2.push_back(sub_bez_obs.size()+ext_sub_obs.size()+num_param_pairs_2); 	
 					opt_params2.push_back(bez_ctrl_pts); 
@@ -3652,8 +3664,6 @@ class GapBarrier
 					// Reset data read from external vehicle
 					ext_path = f1tenth_simulator::PathData();  
 					ext_sub_obs.clear();
-
-					startcheck=1;
 
 
 					nlopt_destroy(opt);
@@ -3939,12 +3949,12 @@ class GapBarrier
 				drive_msg_v2.drive.steering_angle = 0;
 				drive_msg_v2.drive.speed = 0;
 			}
-			// Publish the drive command for both vehicles if this is the first vehicle
+			// Publish the drive command for external vehicle
 			if(num_vehicles == 1) {
 				driver_pub.publish(drive_msg);
-			} else if (num_vehicles > 1 && vehicle_prefix == "/racecar1/") {
+			} else if (num_vehicles > 1) {
 				// Publish the drive command for both vehicles
-				driver_pub.publish(drive_msg);
+				//driver_pub.publish(drive_msg);
 				driver_pub_v2.publish(drive_msg_v2);
 			}
 		}

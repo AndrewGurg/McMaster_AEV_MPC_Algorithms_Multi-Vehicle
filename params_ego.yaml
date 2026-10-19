@@ -31,6 +31,8 @@ min_cv_range: 0.3 # meters
 max_cv_range: 3.0 # meters
 num_cv_sample_rows: 16
 num_cv_sample_cols: 300
+horiz_fov: 1.518 # radians (87 deg)
+vert_fov:  1.012 # radians (58 deg)
 
 cv_lidar_range_max_diff: 20 # meters; @TODO: tune this or ignore it
 camera_height: 0.15 #0.144 # meters; @TODO: use altitude measured by IMU
@@ -246,7 +248,7 @@ yolo_cols: 640
 veh_det_length: 0.5
 veh_det_width: 0.4
 
-use_neural_net: 1
+use_neural_net: 0
 
 theta_band_smooth: 200
 theta_band_diff: rad(pi/8)
@@ -267,7 +269,7 @@ bez_ctrl_pts: 5
 bez_curv_pts: 10
 bez_alpha: 1
 bez_beta: 10
-bez_min_dist: 0.5
+bez_min_dist: 0.4
 bez_t_end: 1.5 # MODIFIED Up from 1.5, longer time horizon
 obs_sep: 0.2
 max_obs: 100
@@ -283,6 +285,9 @@ disp_ext_factor: 0.5
 # F-QBMPC Base Weights
 pot_field_factor_F_QBMPC: 1
 velocity_factor_F_QBMPC: 5
+
+# C-QBMPC Base Weights
+path_sep_factor_C_QBMPC: 1
 
 #Leader-follower MPC pursuit parameters
 MPC_dist: 0.8 #Min distance, below which we focus on MPC
