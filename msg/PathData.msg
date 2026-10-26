@@ -1,7 +1,9 @@
 std_msgs/Header header
-float64[] xptplot
-float64[] yptplot
-float32 time_horizon
+float64[] bez_x
+float64[] bez_y
+float64 velocity
+float64 angle
+float64 time_horizon
 int32 num_disc
 bool fixed
 

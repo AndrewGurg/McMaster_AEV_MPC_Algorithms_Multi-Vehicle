@@ -225,7 +225,6 @@ double myfunc(unsigned n, const double *x, double *grad, void *my_func_data) //N
 }
 
 
-// TODO Adapt this for multiple vehicles
 double myfunc_mult(unsigned n, const double *x, double *grad, void *my_func_data) //NLOPT cost function
 {
 	double* raw_data = static_cast<double*>(my_func_data); //First extract as 1D array to get the column count (first value passed)
@@ -382,6 +381,21 @@ double myfunc_mult(unsigned n, const double *x, double *grad, void *my_func_data
 	/* y4_v2 */ grad[9]=grad[9]-path_sep_factor*-2*(bez_curv[i][1]-bez_curv2[j][1])*(bez_alpha/dist2+1.0/pow(dist2,2))*exp(-bez_alpha*dist2)*py4_v2;
 			}
 		}
+
+	// 	// Attract end point of our curve to current position of detected vehicle
+	// 	if(i == bez_curv_pts-1){
+	// 		double dist2= pow(bez_curv[i][0]-bez_curv2[0][0],2)+pow(bez_curv[i][1]-bez_curv2[0][1],2); //Squared distance
+			
+	// 		funcreturn=funcreturn+1*dist2; //Sum of reciprocal squared distances, exponentially decaying weight
+	// 		//Next, find grad for each of five variables
+	// 		if(grad){
+	// /* x2 */ 	grad[0]=grad[0]+1*2*(bez_curv[i][0]-bez_curv2[0][0])*px2;
+	// /* x3 */ 	grad[1]=grad[1]+1*2*(bez_curv[i][0]-bez_curv2[0][0])*px3;
+	// /* y3 */ 	grad[2]=grad[2]+1*2*(bez_curv[i][1]-bez_curv2[0][1])*py3;
+	// /* x4 */ 	grad[3]=grad[3]+1*2*(bez_curv[i][0]-bez_curv2[0][0])*px4;
+	// /* y4 */ 	grad[4]=grad[4]+1*2*(bez_curv[i][1]-bez_curv2[0][1])*py4;
+	// 		}
+	// 	}
 		
 	}
 
@@ -588,8 +602,6 @@ void bezier_inequality_con(unsigned m, double *result, unsigned n, const double*
 }
 
 
-// TODO 
-// Adapt this for multiple vehicles
 void bezier_inequality_con_mult(unsigned m, double *result, unsigned n, const double* x, double* grad, void* my_func_data){ //Bezier Curve inequalities
 	
 	double* raw_data = static_cast<double*>(my_func_data); //First extract as 1D array to get the column count (first value passed)
@@ -2524,6 +2536,10 @@ class GapBarrier
 		}
 
 		void vehicle_tracking(double dt){
+			// TODO Adjust to 2 or 3 variables, as velocity and steering angle can be shared. Use the measured position and communicated heading angle as variables 
+			// (Maybe don't even need heading angle as variable, as it can be shared with IMU)
+
+			// TODO Adjust Deletion logic to logic-based track management. Maybe change whole system to Tent-Conf-Dead track manager.
 			// Run Kalman Filter Tracker for External Vehicles
 			for (int q=car_detects.size()-1; q>=0;q--){ //Iterate backwards to handle deletions
 				if(car_detects[q].last_det==0){ //No detection over last cycle
@@ -2699,6 +2715,45 @@ class GapBarrier
 
 		}
 
+		std::vector<std::vector<double>> subsample_obstacles(std::vector<float> ranges, std::vector<double> angles){
+			std::vector<std::vector<double>> bez_obs;
+			std::vector<std::vector<double>> sub_bez_obs;
+			for(int i=0;i<ranges.size();i++){
+				bez_obs.push_back({ranges[i]*cos(angles[i]),ranges[i]*sin(angles[i])});
+			}
+
+			double obs_sep1=obs_sep;
+			int num_obs=100000;
+
+			while(num_obs>max_obs){
+				sub_bez_obs.clear();
+				for (const auto& obstacle : bez_obs) {
+					// Accessing x and y coordinates
+					double x_ob = obstacle[0]; // x coordinate
+					double y_ob = obstacle[1]; // y coordinate
+					double min_dist=100;
+
+					for (const auto& obstacle1 : sub_bez_obs) {
+						double mydist=pow(pow(obstacle1[0]-x_ob,2)+pow(obstacle1[1]-y_ob,2),0.5);
+						if(mydist<min_dist){
+							min_dist=mydist;
+						}
+					}
+					if(min_dist>obs_sep1 && pow(pow(x_ob,2)+pow(y_ob,2),0.5)<max_lidar_range_opt){
+						// FILE *file1 = fopen("/home/gjsk/catkin_ws/bezier.txt", "a");
+						// fprintf(file1,"%lf, %lf\n",obstacle[0],obstacle[1]);
+						// fclose(file1);
+						sub_bez_obs.push_back({obstacle[0],obstacle[1]});
+					}
+					
+				}
+				num_obs=sub_bez_obs.size();
+				obs_sep1=obs_sep1*1.1;
+			}
+
+			return sub_bez_obs;
+		}
+
 
 		void ext_lidar_callback(const sensor_msgs::LaserScanConstPtr &data){
 			// Read the lidar scan data from an external vehicle
@@ -2728,6 +2783,36 @@ class GapBarrier
 			//path_msg.num_disc = xptplot.size();
 			path_msg.fixed = false;
 			path_pub.publish(path_msg);
+
+			// Visualize path guess as well (Single-Vehicle Optimizaiton)
+			bez_guess.header.frame_id = base_frame;
+			bez_guess.header.stamp = ros::Time::now();
+			bez_guess.type = visualization_msgs::Marker::POINTS;
+			bez_guess.id = 0; 
+			bez_guess.ns = "points";
+			bez_guess.action = visualization_msgs::Marker::ADD;
+			bez_guess.color.a = 1.0;
+			bez_guess.color.r = 0.1; 
+			bez_guess.color.g = 0.1;
+			bez_guess.color.b = 0.3;
+			bez_guess.pose.orientation.w = 1;
+
+			bez_guess.scale.x = 0.1;  // Size of points
+			bez_guess.scale.y = 0.1;
+			
+			bez_guess.lifetime = ros::Duration(0.1);
+			geometry_msgs::Point p;
+			bez_guess.points.clear();
+
+			for(int i=0; i<bez_curv_pts*10; i++){
+				double t=double(i)/double(bez_curv_pts*10);
+				double bez_x_i=4*pow(1-t,3)*t*bez_x[0]+6*pow(1-t,2)*pow(t,2)*bez_x[1]+4*(1-t)*pow(t,3)*bez_x[2]+pow(t,4)*bez_x[3];
+				double bez_y_i=6*pow(1-t,2)*pow(t,2)*bez_y[1]+4*(1-t)*pow(t,3)*bez_y[2]+pow(t,4)*bez_y[3]; //y1=0
+				p.x = bez_x_i; p.y = bez_y_i; p.z = 0;
+				bez_guess.points.push_back(p);
+			}
+
+			bez_guess_mark.publish(bez_guess);
 		}
 
 		void path_callback(const f1tenth_simulator::PathData & path_msg){
@@ -2825,41 +2910,8 @@ class GapBarrier
 			}
 
 			//Select a subsample of the non-vehicle obstacles
-			std::vector<std::vector<double>> bez_obs_no_veh;
-			std::vector<std::vector<double>> sub_bez_obs_no_veh;
-			for(int i=0;i<fused_ranges.size();i++){
-				bez_obs_no_veh.push_back({fused_ranges[i]*cos(lidar_transform_angles[i]),fused_ranges[i]*sin(lidar_transform_angles[i])});
-			}
+			std::vector<std::vector<double>> sub_bez_obs_no_veh = subsample_obstacles(fused_ranges, lidar_transform_angles);
 
-			//Store the vehicle detections separately
-			// std::vector<std::vector<double>> bez_obs_ext_veh;
-
-
-			double obs_sep1=obs_sep;
-			double num_obs=100000;
-
-			while(num_obs>max_obs){
-				sub_bez_obs_no_veh.clear();
-				for (const auto& obstacle : bez_obs_no_veh) {
-					// Accessing x and y coordinates
-					double x_ob = obstacle[0]; // x coordinate
-					double y_ob = obstacle[1]; // y coordinate
-					double min_dist=100;
-
-					for (const auto& obstacle1 : sub_bez_obs_no_veh) {
-						double mydist=pow(pow(obstacle1[0]-x_ob,2)+pow(obstacle1[1]-y_ob,2),0.5);
-						if(mydist<min_dist){
-							min_dist=mydist;
-						}
-					}
-					if(min_dist>obs_sep1 && pow(pow(x_ob,2)+pow(y_ob,2),0.5)<max_lidar_range_opt){
-						sub_bez_obs_no_veh.push_back({obstacle[0],obstacle[1]});
-					}
-					
-				}
-				num_obs=sub_bez_obs_no_veh.size();
-				obs_sep1=obs_sep1*1.1;
-			}
 			// Publish my subsampled obstacle data from my frame
 			subsampled_obstacle_publisher(sub_bez_obs_no_veh);
 
@@ -2881,7 +2933,6 @@ class GapBarrier
 				std::vector<double> lidar_transform_angles_tot0;
 				std::vector<float> fused_ranges_MPC_veh_det0;
 				std::vector<double> lidar_transform_angles_veh_det0;
-
 
 				double theta_refs[nMPC]; //Reference angles for each time interval
 				double startx, starty; //Initial points for that tracking line interval (line is likely not connected to prev. so jump)
@@ -2948,6 +2999,11 @@ class GapBarrier
 						}
 						
 					}
+
+					if(num_MPC==0){ //Take the original reference points for subsampling obstacles in NLOPT (Without detection)
+						fused_ranges_MPC_tot0=fused_ranges_MPC_tot;
+						lidar_transform_angles_tot0=lidar_transform_angles_tot;
+					}
 					
 					if(use_neural_net){ //Augment LIDAR with detected vehicle projected paths as well
 						std::vector<float> fused_ranges_MPC_veh_det;
@@ -3000,10 +3056,12 @@ class GapBarrier
 
 									}
 									//Now, update the vehicle position for this next timestep
-									track_x=track_x+car_detects[i].state[3]*cos(track_theta)*dt/mult_factor; //For the next timeframe (LIDAR callback), find position
-									track_y=track_y+car_detects[i].state[3]*sin(track_theta)*dt/mult_factor;
-									track_theta=track_theta+car_detects[i].state[3]/wheelbase*tan(car_detects[i].state[4])*dt/mult_factor;
-
+									// track_x=track_x+car_detects[i].state[3]*cos(track_theta)*dt/mult_factor; //For the next timeframe (LIDAR callback), find position
+									// track_y=track_y+car_detects[i].state[3]*sin(track_theta)*dt/mult_factor;
+									// track_theta=track_theta+car_detects[i].state[3]/wheelbase*tan(car_detects[i].state[4])*dt/mult_factor;
+									
+									// Skip this for now
+									break;
 								}
 
 							}
@@ -3051,10 +3109,6 @@ class GapBarrier
 						
 					}
 
-					if(num_MPC==0){ //Take the original reference points for subsampling obstacles in NLOPT
-						fused_ranges_MPC_tot0=fused_ranges_MPC_tot;
-						lidar_transform_angles_tot0=lidar_transform_angles_tot;
-					}
 
 					std::vector<float> proc_ranges_MPC = preprocess_lidar_MPC(fused_ranges_MPC_tot,lidar_transform_angles_tot);
 
@@ -3209,41 +3263,8 @@ class GapBarrier
 
 
 				//Select a subsample of all obstacles
-				std::vector<std::vector<double>> bez_obs;
-				std::vector<std::vector<double>> sub_bez_obs;
-				for(int i=0;i<fused_ranges_MPC_tot0.size();i++){
-					bez_obs.push_back({fused_ranges_MPC_tot0[i]*cos(lidar_transform_angles_tot0[i]),fused_ranges_MPC_tot0[i]*sin(lidar_transform_angles_tot0[i])});
-				}
-
-				double obs_sep1=obs_sep;
-				int num_obs=100000;
-
-				while(num_obs>max_obs){
-					sub_bez_obs.clear();
-					for (const auto& obstacle : bez_obs) {
-						// Accessing x and y coordinates
-						double x_ob = obstacle[0]; // x coordinate
-						double y_ob = obstacle[1]; // y coordinate
-						double min_dist=100;
-
-						for (const auto& obstacle1 : sub_bez_obs) {
-							double mydist=pow(pow(obstacle1[0]-x_ob,2)+pow(obstacle1[1]-y_ob,2),0.5);
-							if(mydist<min_dist){
-								min_dist=mydist;
-							}
-						}
-						if(min_dist>obs_sep1 && pow(pow(x_ob,2)+pow(y_ob,2),0.5)<max_lidar_range_opt){
-							// FILE *file1 = fopen("/home/gjsk/catkin_ws/bezier.txt", "a");
-							// fprintf(file1,"%lf, %lf\n",obstacle[0],obstacle[1]);
-							// fclose(file1);
-							sub_bez_obs.push_back({obstacle[0],obstacle[1]});
-						}
-						
-					}
-					num_obs=sub_bez_obs.size();
-					obs_sep1=obs_sep1*1.1;
-				}
-
+				std::vector<std::vector<double>> sub_bez_obs = subsample_obstacles(fused_ranges_MPC_tot0, lidar_transform_angles_tot0);
+				int num_obs = sub_bez_obs.size();
 
 				// FILE *file1 = fopen("/home/gjsk/catkin_ws/bezier.txt", "a");
 				// fprintf(file1,"*******************\n");
@@ -3278,6 +3299,7 @@ class GapBarrier
 				std::vector<double> opt_params2;
 				int num_param_pairs_1 = 4;
 				int num_param_pairs_2 = 9;
+				// int num_veh_obs = fused_ranges_MPC_veh_det0.size();
 
 				opt_params1.push_back(num_obs+num_param_pairs_1); 	opt_params1.push_back(bez_ctrl_pts); 
 				opt_params1.push_back(bez_curv_pts); 				opt_params1.push_back(bez_alpha); 
@@ -3300,6 +3322,13 @@ class GapBarrier
 					opt_params2.push_back(sub_bez_obs[i][0]);
 					opt_params2.push_back(sub_bez_obs[i][1]);
 				}
+				// Include the current position of the vehicle in the set of obstacles 
+				// for(int i=0;i<fused_ranges_MPC_veh_det0.size();i++){
+				// 	opt_params1.push_back(fused_ranges_MPC_veh_det0[i]*cos(lidar_transform_angles_veh_det0[i]));
+				// 	opt_params1.push_back(fused_ranges_MPC_veh_det0[i]*sin(lidar_transform_angles_veh_det0[i]));
+				// 	opt_params2.push_back(fused_ranges_MPC_veh_det0[i]*cos(lidar_transform_angles_veh_det0[i]));
+				// 	opt_params2.push_back(fused_ranges_MPC_veh_det0[i]*sin(lidar_transform_angles_veh_det0[i]));
+				// }	
 
 				nlopt_set_min_objective(opt, myfunc, opt_params1.data());
 				double tol[num_cons*bez_curv_pts];
@@ -3546,14 +3575,14 @@ class GapBarrier
 
 					nlopt_set_min_objective(opt, myfunc_mult, opt_params1.data());
 					double tol2[num_cons_mult*bez_curv_pts];
-					std::fill_n(tol2, num_cons_mult*bez_curv_pts, 1e-8);
+					std::fill_n(tol2, num_cons_mult*bez_curv_pts, 1e-5);
 					
 					nlopt_add_inequality_mconstraint(opt, num_cons_mult*bez_curv_pts, bezier_inequality_con_mult, opt_params2.data(), tol2);
 				
-					nlopt_set_xtol_rel(opt, 0.001); //Termination parameters
-					nlopt_set_xtol_abs1(opt, 0.001);
+					nlopt_set_xtol_rel(opt, 1e-6); //Termination parameters
+					nlopt_set_xtol_abs1(opt, 1e-6);
 					nlopt_set_maxtime(opt, 0.05);
-					
+
 
 
 					successful_opt=0;
@@ -3600,6 +3629,22 @@ class GapBarrier
 						successful_opt=1;
 						// forcestop = 0;
 						printf("Successful Opt: %s\n", nlopt_result_to_string(optim));
+
+						// Checking if any constraints are violated
+						int m = num_cons_mult*bez_curv_pts;
+						std::vector<double> cons(m, 0.0);
+						bezier_inequality_con_mult(m, cons.data(), num_opt_vars, xnew, NULL, opt_params2.data());
+						// (use bezier_inequality_con_mult and xnew for the second optimization)
+
+						double tol_check = 1e-5;
+						for (int i = 0; i < m; i++) {
+							if (cons[i] > tol_check) {
+								int pt   = i / num_cons_mult;        // which discretized curve point
+								int type = i % num_cons_mult;        // which constraint at that point
+								printf("Violated: point %d, type %d, value %e\n", pt, type, cons[i]);
+							}
+						}
+
 						safe_distance_adapt=safe_distance;
 						//Save the control points here
 						bez_x2=xnew[0];
@@ -3892,6 +3937,12 @@ class GapBarrier
 					p5.x = obstacle1[0]; p5.y = obstacle1[1]; p5.z = 0;
 					bez.points.push_back(p5);
 				}
+				for(int i=0;i<fused_ranges_MPC_veh_det0.size();i++){
+					p5.x=fused_ranges_MPC_veh_det0[i]*cos(lidar_transform_angles_veh_det0[i]);
+					p5.y=fused_ranges_MPC_veh_det0[i]*sin(lidar_transform_angles_veh_det0[i]);
+					p5.z = 0;
+					bez.points.push_back(p5);
+				}	
 
 				for(int i=0; i<bez_curv_pts*10; i++){
 					double t=double(i)/double(bez_curv_pts*10-1);
