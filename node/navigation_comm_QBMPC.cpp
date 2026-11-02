@@ -119,6 +119,7 @@ std::vector<std::vector<double>> transform_points_to_ego_frame(
 
 struct vehicle_detection
 {
+	std::string baseframe; // base_link frame for the detected vehicle 
 	int init=0; //Whether the KF for this detetction has been initialized
 	std::vector<int> bound_box={0,0,0,0}; //The CNN bounding box for the last cycle to try to match appropriately in the case of multi-detection
 	//{miny, minx, maxy, maxx}
@@ -1496,12 +1497,12 @@ class GapBarrier
 
 					// Only detect for simulation if external vehicle is within depth camera FOV
 					if(atan2(dety, detx) < horiz_fov/2 && atan2(dety, detx) > -horiz_fov/2){
-						ext_rel_x=detx;
-						ext_rel_y=dety;
-						ext_rel_theta=ext_pose_theta-simtheta;
-						while(ext_rel_theta>M_PI) ext_rel_theta-=2*M_PI;
-						while(ext_rel_theta<-M_PI) ext_rel_theta+=2*M_PI;
-						ext_tf_relative_valid=true;
+						// ext_rel_x=detx;
+						// ext_rel_y=dety;
+						// ext_rel_theta=ext_pose_theta-simtheta;
+						// while(ext_rel_theta>M_PI) ext_rel_theta-=2*M_PI;
+						// while(ext_rel_theta<-M_PI) ext_rel_theta+=2*M_PI;
+						// ext_tf_relative_valid=true;
 
 						tf_data new_tf;
 						new_tf.tf_x=simx; new_tf.tf_y=simy; new_tf.tf_theta=simtheta; new_tf.tf_time=ros::Time::now().toSec();
@@ -1524,7 +1525,7 @@ class GapBarrier
 							car_detects[0].meas_tf=new_tf;
 						}
 					}
-					else {ext_tf_relative_valid=false;} // 
+					//else {ext_tf_relative_valid=false;} 
 				}
 				else if(transform.header.frame_id == map_frame && transform.child_frame_id == base_frame){ //This is for simulation only
 					simx=transform.transform.translation.x;
@@ -2540,6 +2541,7 @@ class GapBarrier
 			// (Maybe don't even need heading angle as variable, as it can be shared with IMU)
 
 			// TODO Adjust Deletion logic to logic-based track management. Maybe change whole system to Tent-Conf-Dead track manager.
+
 			// Run Kalman Filter Tracker for External Vehicles
 			for (int q=car_detects.size()-1; q>=0;q--){ //Iterate backwards to handle deletions
 				if(car_detects[q].last_det==0){ //No detection over last cycle
@@ -2658,6 +2660,7 @@ class GapBarrier
 				state_transition_lin(2,4)=std::max(default_dt,dt)*car_detects[q].state[3]/(wheelbase*cos(car_detects[q].state[4])*cos(car_detects[q].state[4]));
 
 				if(car_detects[q].last_det==0){ //No detection in this cycle, don't use any measure, just predicted state and covariance
+					// TODO Check if there is a communicated measurement to use as the predicted state
 					car_detects[q].state=pred_state;
 					printf("Missed Measure (%d)\n",q);
 
@@ -2816,14 +2819,45 @@ class GapBarrier
 		}
 
 		void path_callback(const f1tenth_simulator::PathData & path_msg){
-			// Store the path data of the external vehicle
-			ext_path=path_msg;
 			// Throw the data out if it's too old
-			if (ros::Time::now() - ext_path.header.stamp > ros::Duration(0.5)) {
+			if (ros::Time::now() - path_msg.header.stamp > ros::Duration(0.5)) {
 				ROS_WARN_THROTTLE(2.0, "Received path is older than 0.5 seconds; ignoring");
 				ext_path = f1tenth_simulator::PathData();  // Reset to empty path
 				return;
 			}
+			// Store the path data of the external vehicle
+			ext_path=path_msg;
+			// Relative position isnt valid until we verify the path given has an associated detection
+			ext_tf_relative_valid=false;
+			// TODO Associate external vehicle's base_link with this 
+			// Check which detection velocity/heading most closely matches the given velocity/heading
+			
+			for(int i = 0; i < car_detects.size(); i++){
+				if (car_detects[i].init==2){
+					double det_vel = car_detects[i].state[3];
+					double det_steer = car_detects[i].state[4];
+					double ext_vel = path_msg.velocity;
+					double ext_steer = path_msg.angle;
+					// Coarse gating, check if steering angle and velocity are approximately correct
+					printf("Given Velocity: %f \nGuessed Velocity: %f \nGiven Steering: %f \nGuessed Steering: %f \n", ext_vel, det_vel, ext_steer, det_steer);
+					printf("Velocity Diff: %f \nSteering Diff: %f \n", std::abs(det_vel-ext_vel), std::abs(det_steer-ext_steer));
+					if(std::abs(det_vel-ext_vel) < 0.5 && std::abs(det_steer-ext_steer) < 0.3){
+						std::cout << "Looks like that's the correct vehicle at frame " << path_msg.header.frame_id << std::endl;
+						car_detects[i].baseframe = path_msg.header.frame_id;
+						// Set relative positions 
+						ext_rel_x=car_detects[i].state[0];
+						ext_rel_y=car_detects[i].state[1];
+						ext_rel_theta=car_detects[i].state[2];
+						while(ext_rel_theta>M_PI) ext_rel_theta-=2*M_PI;
+						while(ext_rel_theta<-M_PI) ext_rel_theta+=2*M_PI;
+						ext_tf_relative_valid=true;
+						// Should I update states of velocity and steering angle here too?
+
+					}
+				}
+			}
+
+
 		}
 
 		void subsampled_obstacle_publisher(std::vector<std::vector<double>> sub_obstacles){
@@ -2841,20 +2875,18 @@ class GapBarrier
 		}
 
 		void subsampled_obstacle_callback(const f1tenth_simulator::SubObsData & sub_obs_msg){ 
-			// Unpack the obstacle data from the message 
-			ext_sub_obs.clear();
-			for(const auto& obstacle : sub_obs_msg.sub_obs_pts){
-				ext_sub_obs.push_back({obstacle.x, obstacle.y}); 
-			}
-
-			// Use simulation TF when available. In experiment, use the YOLO tracker
+			// Get position and heading of vehicle that sent this data
 			double rel_x, rel_y, rel_theta;
 			if(ext_tf_relative_valid){
-				//rel_x=ext_rel_x; rel_y=ext_rel_y; rel_theta=ext_rel_theta;
-				if(!car_detects.empty() && car_detects[0].init==2){
-					rel_x=car_detects[0].state[0];
-					rel_y=car_detects[0].state[1];
-					rel_theta=car_detects[0].state[2];
+				// TODO Check if there is an associated frame for these detections
+				for(int i = 0; i < car_detects.size(); i++){
+					if(car_detects[i].baseframe == sub_obs_msg.header.frame_id){
+						rel_x=car_detects[i].state[0];
+						rel_y=car_detects[i].state[1];
+						rel_theta=car_detects[i].state[2];
+						while(rel_theta>M_PI) rel_theta-=2*M_PI;
+						while(rel_theta<-M_PI) rel_theta+=2*M_PI;
+					}
 				}
 			}
 			else{
@@ -2863,14 +2895,19 @@ class GapBarrier
 				return;
 			}
 
+			// Unpack the obstacle data from the message 
+			ext_sub_obs.clear();
+			for(const auto& obstacle : sub_obs_msg.sub_obs_pts){
+				ext_sub_obs.push_back({obstacle.x, obstacle.y}); 
+			}
+
+			// Transform obstacles to ego frame
 			const double c=cos(rel_theta), s=sin(rel_theta);
 			for(auto& obstacle : ext_sub_obs){
 				const double x=obstacle[0], y=obstacle[1];
 				obstacle[0]=rel_x+c*x-s*y;
 				obstacle[1]=rel_y+s*x+c*y;
 			}
-
-			
 
 		}
 
@@ -2950,55 +2987,10 @@ class GapBarrier
 
 				double startxplot[nMPC],startyplot[nMPC];
 				std::vector<double> xptplot(nMPC), yptplot(nMPC);
-				std::vector<double> wl = {0.0, 0.0};
-				std::vector<double> wr = {0.0, 0.0};
-				std::vector<double> wc = {0.0, 0.0};
-				double mapped_x=locx, mapped_y=locy, mapped_theta=loctheta;
 
 				for (int num_MPC=0;num_MPC<bez_ctrl_pts-3;num_MPC++){
 					std::vector<float> fused_ranges_MPC_tot=fused_ranges_MPC;
 					std::vector<double> lidar_transform_angles_tot=lidar_transform_angles; //The cumulative ranges and angles for both map (if used) and lidar
-
-					if(use_map){ //Augment LIDAR with map obstacle points too
-						std::vector<float> fused_ranges_MPC_map;
-						std::vector<double> lidar_transform_angles_map; //These are the additional ranges & angles from fixed map that will be sorted, included in obs calculations
-					
-						double map_xval=mapped_x+cos(mapped_theta)*xpt-sin(mapped_theta)*ypt;
-						double map_yval=mapped_y+sin(mapped_theta)*xpt+cos(mapped_theta)*ypt;
-						for(int i=0;i<map_pts.size();i++){
-							if(pow(map_pts[i][0]-map_xval,2)+pow(map_pts[i][1]-map_yval,2)<pow(max_lidar_range_opt,2)){
-								double x_base=(map_pts[i][0]-locx)*cos(loctheta)+(map_pts[i][1]-locy)*sin(loctheta);
-								double y_base=-(map_pts[i][0]-locx)*sin(loctheta)+(map_pts[i][1]-locy)*cos(loctheta);
-								double x_fut=(x_base-xpt)*cos(theta_ref)+(y_base-ypt)*sin(theta_ref);
-								double y_fut=-(x_base-xpt)*sin(theta_ref)+(y_base-ypt)*cos(theta_ref);
-								double ang_base=atan2(y_fut,x_fut);
-								if (ang_base>M_PI) ang_base-=2*M_PI;
-								if (ang_base<-M_PI) ang_base+=2*M_PI;
-								lidar_transform_angles_map.push_back(ang_base);
-								fused_ranges_MPC_map.push_back(pow(pow(x_fut,2)+pow(y_fut,2),0.5));
-							}
-						}
-						fused_ranges_MPC_tot.insert(fused_ranges_MPC_tot.end(), fused_ranges_MPC_map.begin(), fused_ranges_MPC_map.end());
-						lidar_transform_angles_tot.insert(lidar_transform_angles_tot.end(), lidar_transform_angles_map.begin(), lidar_transform_angles_map.end());
-						
-						std::vector<std::pair<double, double>> vec;
-						for (int i = 0; i < fused_ranges_MPC_tot.size(); ++i) {
-							vec.push_back(std::make_pair(lidar_transform_angles_tot[i], fused_ranges_MPC_tot[i]));
-						}
-
-						// Step 2: Sort the vector of pairs based on the first element (myvec)
-						std::sort(vec.begin(), vec.end(), [](const std::pair<double, double> &a, const std::pair<double, double> &b) {
-							return a.first < b.first; // Compare the first elements of the pairs (myvec values)
-						});
-
-						// Step 3: Unpack the sorted pairs back into the original arrays
-						for (int i = 0; i < fused_ranges_MPC_tot.size(); ++i) {
-							lidar_transform_angles_tot[i] = vec[i].first;
-							fused_ranges_MPC_tot[i] = vec[i].second;
-							
-						}
-						
-					}
 
 					if(num_MPC==0){ //Take the original reference points for subsampling obstacles in NLOPT (Without detection)
 						fused_ranges_MPC_tot0=fused_ranges_MPC_tot;
@@ -3431,7 +3423,7 @@ class GapBarrier
 
 				// TODO find number of vehicles to optimize
 				// Check if there is another car in experiment, or another vehicle in simulation, and the other vehicle sent guess of a path and lidar scan
-				if(num_vehicles > 1 && (ext_tf_relative_valid || !car_detects.empty()) && !ext_path.bez_x.empty() && !ext_sub_obs.empty()){
+				if(num_vehicles > 1 && ext_tf_relative_valid && !ext_path.bez_x.empty() && !ext_sub_obs.empty()){
 
 					//TODO 
 					// Get the subsample of obstacles from external vehicle (Most recent publish from that vehicle for now)
